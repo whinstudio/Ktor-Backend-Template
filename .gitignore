@@ -1,0 +1,14 @@
+.gradle/
+.kotlin/
+build/
+.local-server/
+.env
+*.env
+!deploy/.env.example
+*.p8
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+.DS_Store
+.idea/
+.claude/

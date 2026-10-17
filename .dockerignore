@@ -1,0 +1,11 @@
+.git
+.gradle
+.kotlin
+.idea
+build
+.local-server
+.env
+*.env
+deploy
+.github
+.DS_Store

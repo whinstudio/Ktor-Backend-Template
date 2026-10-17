@@ -1,0 +1,90 @@
+# Cmpose Backend
+
+A production-ready Kotlin/Ktor backend for a mobile app: Firebase sign-in verified on the server, PostgreSQL with
+Flyway migrations, file uploads, account deletion, one sample feature to copy, and the parts to deploy it as one
+container behind a shared nginx and PostgreSQL.
+
+- Kotlin on JVM 21, Ktor, Exposed, Flyway, PostgreSQL, HikariCP, logback.
+- Sign-in: the app signs in with Firebase; the server checks each ID token's signature against Google's public keys,
+  its audience, issuer and age. No Admin SDK and no service account.
+- Tests run on an embedded PostgreSQL and sign their own tokens with a test key, so `./gradlew build` needs neither a
+  database nor a network.
+
+## Layout
+
+| Path | What |
+|------|------|
+| `src/main/kotlin/.../config` | `AppConfig`: every setting, read from the environment |
+| `src/main/kotlin/.../plugins` | errors, security headers, CORS, body limits, rate limits, request ids, client version |
+| `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me` |
+| `src/main/kotlin/.../files` | uploads (type read from the bytes) and downloads |
+| `src/main/kotlin/.../feature/sample` | the sample feature (`/api/v1/items`): the shape to copy |
+<!-- cmpose:sharing -->
+| `src/main/kotlin/.../sharing` | spaces, roles and invitations |
+<!-- /cmpose:sharing -->
+| `src/main/kotlin/.../openapi` | the API description, served at `/api/v1/openapi.json` |
+| `src/main/resources/db/migration` | Flyway migrations |
+| `src/local/kotlin` | the local runner (embedded PostgreSQL); not in the release jar |
+| `deploy/` | Dockerfile, compose fragment, nginx location, database script, `.env.example` |
+
+## Run it locally
+
+Needs JDK 21. The local server keeps everything in `.local-server/` (git-ignored):
+
+1. Create `.local-server/config.properties` with `firebaseProjectId=<your Firebase project id>` (and optionally
+   `port=<port>`; the default is `18001`).
+2. `./gradlew runLocal` starts the server on `127.0.0.1` with an embedded PostgreSQL kept in `.local-server/`. It
+   prints `LOCAL_SERVER_READY port=18001` when it accepts requests.
+3. `curl http://127.0.0.1:18001/health` answers `{"status":"ok","version":"local"}`. Calls under `/api/v1` need an
+   `Authorization: Bearer <Firebase ID token>` header from a signed-in app.
+
+`./gradlew resetLocal` deletes `.local-server/` (database, files and settings). `./gradlew build` compiles, runs detekt
+and the tests.
+
+## API conventions
+
+- All routes are under `/api/v1` except `/health` (liveness) and `/ready` (the database answers). The API description
+  is `GET /api/v1/openapi.json`.
+- Every error has one shape, with `fields` only for validation errors:
+
+  ```json
+  {"error":{"code":"BAD_REQUEST","message":"Invalid item","requestId":"…","fields":[{"field":"title","message":"…"}]}}
+  ```
+
+  Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
+  `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
+  `UPLOADS_BUSY`. A 500 carries no
+  detail beyond the request id.
+- Headers:
+  - Every response has `X-App-Version` (`APP_VERSION`) and `X-Request-Id`: the client's own id when it sends a safe
+    one (letters, digits, `-`, `_`, `.`, at most 128 characters), else a generated one. Quote it when reporting a
+    problem; the logs carry it.
+  - The app sends `X-Client-Version`. Below `MIN_CLIENT_VERSION` the answer is 426 `CLIENT_UPGRADE_REQUIRED` with
+    `minVersion`; a malformed value is 400; no header passes.
+  - A rate-limited request gets 429 `RATE_LIMITED` with `Retry-After`.
+- A missing or invalid token is 401 `UNAUTHORIZED`. When Google's keys cannot be fetched and none is cached, the answer
+  is 503 `AUTH_UNAVAILABLE`, so the app retries instead of signing out.
+- **The 404 rule:** a row the caller may not see answers 404 `NOT_FOUND`, exactly like a row that does not exist. The
+  server never says 403, so ids cannot be probed.
+<!-- cmpose:sharing -->
+  With sharing, a non-member of a space and a member whose role is too low both get 404.
+<!-- /cmpose:sharing -->
+- Lists page with `limit` and an opaque `cursor`; the response's `nextCursor` is `null` on the last page.
+
+## Configuration
+
+Every setting comes from the environment (`AppConfig`); the server refuses to start when a required one is missing or
+invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`, `FIREBASE_PROJECT_ID`, `FILES_DIR`.
+`deploy/.env.example` lists the optional ones with their defaults.
+
+## Add a feature
+
+Copy the sample feature: `feature/sample` (table, repository, routes, DTOs), its migration `V3__sample.sql` and its
+tests. Then go through [`SECURITY-CHECKLIST.md`](SECURITY-CHECKLIST.md): authorization on every route, the owner filter
+in every query, validation at the boundary, deletion with the account, rate limits, logs without personal data, and the
+IDOR and validation tests. Add the routes to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
+
+## Deploy
+
+CI (`.github/workflows/ci.yml`) builds, tests and scans the code and publishes the image to GitHub's container
+registry. [`deploy/README.md`](deploy/README.md) covers the server contract, the first deployment, updates and rollback.
