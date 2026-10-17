@@ -1,0 +1,15 @@
+<configuration>
+    <!-- One JSON object per line on stdout; MDC fields (requestId, method, path, status, durationMs, userId) included. -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder"/>
+    </appender>
+
+    <logger name="org.flywaydb" level="INFO"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+    <!-- Exposed logs failed statements with their arguments (user ids, emails); errors are logged elsewhere instead. -->
+    <logger name="Exposed" level="OFF"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

@@ -1,0 +1,40 @@
+# The cmpose-app service for the server repository (see deploy/README.md). A valid compose file on its own: the
+# server repository adds it with `include:` or a second `-f`. IMAGE_OWNER, IMAGE_TAG and CMPOSE_APP_MEM_LIMIT come
+# from the server repository's top-level .env; the app's own settings and secrets from apps/cmpose-app.env.
+services:
+  cmpose-app:
+    image: ghcr.io/${IMAGE_OWNER}/cmpose-app:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: ./apps/cmpose-app.env
+    environment:
+      FILES_DIR: /data/files
+    mem_limit: ${CMPOSE_APP_MEM_LIMIT:-512m}
+    pids_limit: 256
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - cmpose-app-files:/data/files
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 40s
+    # No published ports: nginx reaches the app on `proxy`, the app reaches Postgres (host `postgres`) on `db`.
+    networks:
+      - proxy
+      - db
+
+volumes:
+  cmpose-app-files:
+
+networks:
+  proxy:
+    external: true
+  db:
+    external: true

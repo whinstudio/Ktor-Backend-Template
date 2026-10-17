@@ -1,0 +1,8 @@
+src/main/kotlin/io/cmpose/backendtemplate/sharing
+src/main/resources/db/migration/V2__sharing.sql
+src/test/kotlin/io/cmpose/backendtemplate/AccessTest.kt
+src/test/kotlin/io/cmpose/backendtemplate/SpaceRoutesTest.kt
+src/test/kotlin/io/cmpose/backendtemplate/MemberRoutesTest.kt
+src/test/kotlin/io/cmpose/backendtemplate/InviteRoutesTest.kt
+src/test/kotlin/io/cmpose/backendtemplate/SharingDeletionTest.kt
+src/test/kotlin/io/cmpose/backendtemplate/SharingTestClient.kt

@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Keeps the workflow's action pins (commit SHAs with the tag as a comment) current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # The Gradle dependencies (gradle/libs.versions.toml and the plugins).
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+  # The base images of deploy/Dockerfile.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
