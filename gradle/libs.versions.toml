@@ -7,7 +7,7 @@ jwksRsa = "0.22.1"
 javaJwt = "4.5.2"
 exposed = "0.61.0"
 flyway = "11.10.4"
-postgresql = "42.7.7"
+postgresql = "42.7.14"
 hikari = "6.3.0"
 logback = "1.5.18"
 # Newest 8.x on Maven Central, pinned
