@@ -10,7 +10,7 @@ RUN ./gradlew --no-daemon --quiet dependencies --configuration runtimeClasspath 
 COPY src ./src
 RUN ./gradlew --no-daemon shadowJar
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75"
