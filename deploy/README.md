@@ -25,7 +25,7 @@ All values below (`<owner>`, `<domain>`, passwords, project ids) are placeholder
 - The top-level `.env` of the server repository sets `IMAGE_OWNER` (the GitHub owner, lower case) and optionally
   `IMAGE_TAG` and `CMPOSE_APP_MEM_LIMIT` (default `512m`).
 - The image is `ghcr.io/${IMAGE_OWNER}/cmpose-app:${IMAGE_TAG:-latest}`. CI pushes `:<short sha>`, `:latest` (from
-  `main`) and `:<tag>` (from `v*` tags). If the package is private, log the server in once with
+  `develop`) and `:<tag>` (from `v*` tags). If the package is private, log the server in once with
   `docker login ghcr.io` and a read-only (`read:packages`) token.
 - `TRUSTED_PROXIES` defaults to Docker's whole private range (`172.16.0.0/12`). Narrow it to nginx alone: give the
   nginx container a fixed address on the `proxy` network (an `ipam` subnet on the network, `ipv4_address` on the
@@ -84,7 +84,7 @@ Run from the server repository's root.
 
 ## Updating
 
-Steps 4 and 6. Pin a release with `IMAGE_TAG=<tag or short sha>` in the top-level `.env`; `latest` follows `main`.
+Steps 4 and 6. Pin a release with `IMAGE_TAG=<tag or short sha>` in the top-level `.env`; `latest` follows `develop`.
 
 ## Rollback
 
