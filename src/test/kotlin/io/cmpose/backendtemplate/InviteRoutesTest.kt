@@ -7,6 +7,8 @@ import io.cmpose.backendtemplate.sharing.InviteRepository
 import io.cmpose.backendtemplate.sharing.InviteResponse
 import io.cmpose.backendtemplate.sharing.InviteState
 import io.cmpose.backendtemplate.sharing.Invites
+import io.cmpose.backendtemplate.sharing.PendingInvite
+import io.cmpose.backendtemplate.sharing.RevokeResult
 import io.cmpose.backendtemplate.sharing.Role
 import io.cmpose.backendtemplate.sharing.SpaceRepository
 import io.cmpose.backendtemplate.sharing.SpaceResponse
@@ -16,6 +18,8 @@ import io.cmpose.backendtemplate.users.UserRepository
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.put
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
@@ -276,6 +280,13 @@ class InviteRoutesTest {
 
     private suspend fun HttpClient.state(inviteToken: String) = preview(bob, inviteToken).body<InvitePreview>().state
 
+    /** Alice's view of [spaceId]'s pending invites. */
+    private suspend fun HttpClient.pending(spaceId: String): List<PendingInvite> {
+        val response = pendingInvites(alice, spaceId)
+        assertEquals(HttpStatusCode.OK, response.status)
+        return response.body()
+    }
+
     @Test
     fun pendingInviteQuota() = withApp(testConfig().copy(maxPendingInvitesPerSpace = 2)) { client ->
         val space = client.createSpace(alice, "Trip")
@@ -285,15 +296,19 @@ class InviteRoutesTest {
         InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
             .create(UUID.fromString(space.id), aliceId, Role.EDITOR)
         val first = client.invite(alice, space.id, Role.EDITOR)
-        client.invite(alice, space.id, Role.VIEWER)
+        val second = client.invite(alice, space.id, Role.VIEWER)
         client.inviteResponse(alice, space.id, Role.VIEWER).assertQuotaExceeded("invites")
         // Nor does a used one: once Bob accepts the first, there is room for one more.
         assertEquals(HttpStatusCode.OK, client.accept(bob, first.token).status)
         client.invite(alice, space.id, Role.VIEWER)
         client.inviteResponse(alice, space.id, Role.VIEWER).assertQuotaExceeded("invites")
+        // Nor does a revoked one.
+        assertEquals(HttpStatusCode.NoContent, client.revoke(alice, space.id, second.id).status)
+        client.invite(alice, space.id, Role.VIEWER)
+        client.inviteResponse(alice, space.id, Role.VIEWER).assertQuotaExceeded("invites")
         // The quota is per space.
         client.invite(alice, client.createSpace(alice, "Other").id, Role.VIEWER)
-        assertEquals(5L, inviteCount())
+        assertEquals(6L, inviteCount())
     }
 
     @Test
@@ -330,6 +345,10 @@ class InviteRoutesTest {
         withApp(testConfig().copy(maxPendingInvitesPerSpace = 2)) { client ->
             links.forEach { assertEquals(InviteState.VALID, client.state(it.token)) }
             client.inviteResponse(alice, spaceId, Role.VIEWER).assertQuotaExceeded("invites")
+            // The owner still sees all three and can revoke each.
+            assertEquals(links.map { it.id }.toSet(), client.pending(spaceId).map { it.id }.toSet())
+            links.forEach { assertEquals(HttpStatusCode.NoContent, client.revoke(alice, spaceId, it.id).status) }
+            assertEquals(emptyList(), client.pending(spaceId))
         }
         assertEquals(3L, inviteCount())
     }
@@ -405,6 +424,179 @@ class InviteRoutesTest {
                 }
                 assertEquals(listOf(HttpStatusCode.Created, HttpStatusCode.Created), responses.map { it.status })
             }
+        }
+    }
+
+    @Test
+    fun listShowsValidInvitesNewestFirstWithoutTokens() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val spaceId = UUID.fromString(space.id)
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val used = client.invite(alice, space.id, Role.EDITOR)
+        assertEquals(HttpStatusCode.OK, client.accept(bob, used.token).status)
+        val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
+        val expired = InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
+            .create(spaceId, aliceId, Role.EDITOR)
+        val minuteAgo = System.currentTimeMillis() - 60_000
+        val older = InviteRepository(TestDb.database, ttlDays = 7, now = { minuteAgo })
+            .create(spaceId, aliceId, Role.EDITOR)
+        val newest = client.invite(alice, space.id, Role.VIEWER)
+        // Another space's invite is not listed.
+        client.invite(alice, client.createSpace(alice, "Other").id, Role.VIEWER)
+
+        val response = client.pendingInvites(alice, space.id)
+        assertEquals(HttpStatusCode.OK, response.status)
+        val ttl = 7L * 24 * 60 * 60 * 1000
+        assertEquals(
+            listOf(
+                PendingInvite(newest.id, Role.VIEWER, newest.expiresAt - ttl, newest.expiresAt),
+                PendingInvite(older.id, Role.EDITOR, minuteAgo, older.expiresAt),
+            ),
+            response.body<List<PendingInvite>>(),
+        )
+        val text = response.bodyAsText()
+        assertTrue("\"token\"" !in text, text)
+        listOf(used, expired, older, newest).forEach {
+            assertTrue(it.token !in text && sha256Hex(it.token) !in text, text)
+        }
+    }
+
+    @Test
+    fun revokedInvitePreviewsAsRevokedAndCannotBeAccepted() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val link = client.invite(alice, space.id, Role.EDITOR)
+        assertEquals(HttpStatusCode.NoContent, client.revoke(alice, space.id, link.id).status)
+        val preview = client.preview(bob, link.token)
+        assertEquals(HttpStatusCode.OK, preview.status)
+        assertEquals(
+            InvitePreview("Trip", inviterName = null, Role.EDITOR, link.expiresAt, InviteState.REVOKED),
+            preview.body<InvitePreview>(),
+        )
+        val accept = client.accept(bob, link.token)
+        assertEquals(HttpStatusCode.Gone, accept.status)
+        assertEquals("INVITE_REVOKED", accept.errorCode())
+        assertTrue(client.spaces(bob).none { it.id == space.id })
+        assertEquals(emptyList(), client.pending(space.id))
+    }
+
+    @Test
+    fun revokeIsIdempotent() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val link = client.invite(alice, space.id, Role.VIEWER)
+        assertEquals(HttpStatusCode.NoContent, client.revoke(alice, space.id, link.id).status)
+        val afterFirst = inviteRows()
+        assertEquals(HttpStatusCode.NoContent, client.revoke(alice, space.id, link.id).status)
+        assertEquals(afterFirst, inviteRows())
+        assertEquals(InviteState.REVOKED, client.state(link.token))
+        // An expired invite is left as it is: it stays expired.
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
+        val expired = InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
+            .create(UUID.fromString(space.id), aliceId, Role.EDITOR)
+        assertEquals(HttpStatusCode.NoContent, client.revoke(alice, space.id, expired.id).status)
+        assertEquals(InviteState.EXPIRED, client.state(expired.token))
+    }
+
+    @Test
+    fun revokedThenExpiredStaysRevoked() {
+        val db = TestDb.database
+        val users = UserRepository(db)
+        val owner = users.resolveOrCreate(VerifiedIdentity("firebase", "alice", null, false, null))
+        val joiner = users.resolveOrCreate(VerifiedIdentity("firebase", "bob", null, false, null))
+        val spaces = SpaceRepository(db)
+        val spaceId = UUID.fromString(spaces.create(owner, "Trip").id)
+        var clock = 1_000L
+        val invites = InviteRepository(db, ttlDays = 1, now = { clock })
+        val link = invites.create(spaceId, owner, Role.VIEWER)
+        assertEquals(RevokeResult.REVOKED, invites.revoke(spaceId, UUID.fromString(link.id)))
+        assertEquals(InviteState.REVOKED, invites.preview(link.token)?.state)
+        clock = link.expiresAt + 1
+        assertEquals(InviteState.REVOKED, invites.preview(link.token)?.state)
+        assertEquals(AcceptResult.Revoked, invites.accept(link.token, joiner, spaces))
+        assertEquals(RevokeResult.REVOKED, invites.revoke(spaceId, UUID.fromString(link.id)))
+    }
+
+    @Test
+    fun revokingAUsedInviteIs409() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val link = client.invite(alice, space.id, Role.EDITOR)
+        assertEquals(HttpStatusCode.OK, client.accept(bob, link.token).status)
+        val revoke = client.revoke(alice, space.id, link.id)
+        assertEquals(HttpStatusCode.Conflict, revoke.status)
+        assertEquals("INVITE_USED", revoke.errorCode())
+        assertEquals(Role.EDITOR, client.spaces(bob).single { it.id == space.id }.role)
+        assertEquals(InviteState.USED, client.state(link.token))
+    }
+
+    @Test
+    fun revokeOfAnotherSpacesInviteIs404() = withApp { client ->
+        val first = client.createSpace(alice, "Trip")
+        val other = client.createSpace(alice, "Other")
+        val link = client.invite(alice, other.id, Role.VIEWER)
+        listOf(link.id, UUID.randomUUID().toString(), "abc").forEach { inviteId ->
+            val response = client.revoke(alice, first.id, inviteId)
+            assertEquals(HttpStatusCode.NotFound, response.status, inviteId)
+            assertEquals("NOT_FOUND", response.errorCode(), inviteId)
+        }
+        assertEquals(InviteState.VALID, client.state(link.token))
+        assertEquals(listOf(link.id), client.pending(other.id).map { it.id })
+    }
+
+    @Test
+    fun listIsCappedAt200() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        var clock = System.currentTimeMillis() - 10_000
+        // The quota is off (0): nothing but the list's own limit keeps it short.
+        val invites = InviteRepository(TestDb.database, ttlDays = 7, now = { clock++ })
+        val ids = List(201) { invites.create(UUID.fromString(space.id), aliceId, Role.VIEWER).id }
+        assertEquals(ids.reversed().take(200), client.pending(space.id).map { it.id })
+    }
+
+    @Test
+    fun revokeAndAcceptRace() = assertNoDeadlock {
+        withApp { client ->
+            val space = client.createSpace(alice, "Trip")
+            client.userId(bob)
+            // Whichever request comes first stops at the invite row with the space row locked, the other at the
+            // space row. A revoke that comes first wins: the accept then finds it revoked (204, 410). An accept
+            // that comes first wins: the revoke then finds it used (409, 200). Both cannot pass.
+            for (revokeFirst in listOf(true, false)) {
+                val link = client.invite(alice, space.id, Role.VIEWER)
+                val revoke = suspend { client.revoke(alice, space.id, link.id) }
+                val accept = suspend { client.accept(bob, link.token) }
+                val (revoked, accepted) =
+                    if (revokeFirst) race(revoke, accept) else race(accept, revoke).let { (a, r) -> r to a }
+                val statuses = revoked.status to accepted.status
+                if (revokeFirst) {
+                    assertEquals(HttpStatusCode.NoContent to HttpStatusCode.Gone, statuses)
+                    assertEquals("INVITE_REVOKED", accepted.errorCode())
+                    assertEquals(InviteState.REVOKED, client.state(link.token))
+                    assertTrue(client.spaces(bob).none { it.id == space.id })
+                } else {
+                    assertEquals(HttpStatusCode.Conflict to HttpStatusCode.OK, statuses)
+                    assertEquals("INVITE_USED", revoked.errorCode())
+                    assertEquals(InviteState.USED, client.state(link.token))
+                    assertTrue(client.spaces(bob).any { it.id == space.id })
+                }
+            }
+        }
+    }
+
+    /** Runs [first] until it stops at the gated `invites` table, then [second] until it waits too, then both on. */
+    private suspend fun race(
+        first: suspend () -> HttpResponse,
+        second: suspend () -> HttpResponse,
+    ): Pair<HttpResponse, HttpResponse> = InsertGate("invites").use { gate ->
+        coroutineScope {
+            val firstCall = async { first() }
+            val secondCall = try {
+                gate.awaitWaiting(1)
+                async { second() }.also { gate.awaitWaiting(2) }
+            } finally {
+                gate.close()
+            }
+            firstCall.await() to secondCall.await()
         }
     }
 }

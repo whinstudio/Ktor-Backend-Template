@@ -10,6 +10,7 @@ import io.cmpose.backendtemplate.users.MeResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.statement.HttpResponse
@@ -21,6 +22,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.sql.DriverManager
+import java.sql.SQLException
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
 
@@ -53,6 +55,12 @@ suspend fun HttpClient.preview(token: String, inviteToken: String): HttpResponse
 suspend fun HttpClient.accept(token: String, inviteToken: String): HttpResponse =
     post("/api/v1/invites/accept") { jsonBody(token, InviteToken(inviteToken)) }
 
+suspend fun HttpClient.pendingInvites(token: String, spaceId: String): HttpResponse =
+    get("/api/v1/spaces/$spaceId/invites") { bearerAuth(token) }
+
+suspend fun HttpClient.revoke(token: String, spaceId: String, inviteId: String): HttpResponse =
+    delete("/api/v1/spaces/$spaceId/invites/$inviteId") { bearerAuth(token) }
+
 /** [owner] creates a space named [name]; each of [members] joins it through an invite with its role. */
 suspend fun HttpClient.sharedSpace(owner: String, name: String, vararg members: Pair<String, Role>): SpaceResponse {
     val space = createSpace(owner, name)
@@ -81,7 +89,12 @@ class InsertGate(vararg tables: String) : AutoCloseable {
     }.apply { autoCommit = false }
 
     init {
-        connection.createStatement().use { it.execute("LOCK TABLE ${tables.joinToString()} IN EXCLUSIVE MODE") }
+        try {
+            connection.createStatement().use { it.execute("LOCK TABLE ${tables.joinToString()} IN EXCLUSIVE MODE") }
+        } catch (e: SQLException) {
+            connection.close()
+            throw e
+        }
     }
 
     /** Waits (10 s at most) until [count] database sessions wait for a lock, held by the gate or by each other. */
@@ -99,7 +112,6 @@ class InsertGate(vararg tables: String) : AutoCloseable {
     /** Opens the gate: the held inserts go on. Closing it again does nothing. */
     override fun close() {
         if (connection.isClosed) return
-        connection.commit()
-        connection.close()
+        connection.use { it.commit() }
     }
 }

@@ -48,7 +48,12 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
    never `CASCADE`, which would delete shared data, and never a copied name or email, which would outlive the account
    (`SharingDeletionTest`). The privacy notes in `deploy/README.md` say so; keep the app's privacy policy in step.
 1. An invite preview shows whoever holds the token the space name, the role and the inviter's display name, and keeps
-   showing them after the invite is used or expires; only an unknown token is a 404. Add nothing else to the preview.
+   showing them after the invite is used, revoked or expires; only an unknown token is a 404. Add nothing else to the
+   preview. A revoked invite keeps its row and previews as `revoked`, also once it has expired; accepting it is 410
+   `INVITE_REVOKED`.
+1. An OWNER lists a space's pending invites (`GET /api/v1/spaces/{id}/invites`) and revokes one
+   (`DELETE /api/v1/spaces/{id}/invites/{inviteId}`). The list never shows a token or its hash; the token is shown
+   once, when the invite is created. The revoke's log line names no invite, space or token.
 <!-- /cmpose:sharing -->
 1. Schema changes are new Flyway migrations (`V<n>__<name>.sql`); never edit one that has run anywhere.
 1. Responses are DTOs built for the client. Never serialize table rows or internal objects, and never return another

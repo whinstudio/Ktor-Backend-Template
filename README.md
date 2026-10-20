@@ -68,8 +68,8 @@ and the tests.
   beyond the request id.
 <!-- cmpose:sharing -->
   With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
-  (409, already used) and `INVITE_EXPIRED` (410). `QUOTA_EXCEEDED`'s `quota` may also be `spaces`, `members` or
-  `invites`.
+  (409, already used; also on revoking a used one), `INVITE_REVOKED` (410, revoked by an owner) and `INVITE_EXPIRED`
+  (410). `QUOTA_EXCEEDED`'s `quota` may also be `spaces`, `members` or `invites`.
 <!-- /cmpose:sharing -->
 - Headers:
   - Every response has `X-App-Version` (`APP_VERSION`) and `X-Request-Id`: the client's own id when it sends a safe
@@ -86,6 +86,13 @@ and the tests.
   With sharing, a non-member of a space and a member whose role is too low both get 404.
 <!-- /cmpose:sharing -->
 - Lists page with `limit` and an opaque `cursor`; the response's `nextCursor` is `null` on the last page.
+<!-- cmpose:sharing -->
+- Invites: an OWNER lists a space's valid invites with `GET /api/v1/spaces/{id}/invites` (newest first, at most 200,
+  not paged; `id`, `role`, `createdAt`, `expiresAt`, never the token) and revokes one with
+  `DELETE /api/v1/spaces/{id}/invites/{inviteId}` (204, also when called again; 409 `INVITE_USED` once used; another
+  space's invite or an id that is no UUID is 404). A revoked invite keeps previewing as `revoked`, even once it has
+  expired, and stops counting against `MAX_PENDING_INVITES_PER_SPACE`.
+<!-- /cmpose:sharing -->
 
 ## Configuration
 

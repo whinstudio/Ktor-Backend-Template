@@ -8,10 +8,13 @@ import io.cmpose.backendtemplate.plugins.SENSITIVE_LIMIT
 import io.cmpose.backendtemplate.plugins.badRequest
 import io.cmpose.backendtemplate.plugins.notFound
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.log
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import kotlinx.serialization.Serializable
 
@@ -23,11 +26,15 @@ data class InviteRequest(val role: Role)
 @Serializable
 data class InviteToken(val token: String)
 
+private fun inviteUsed(): Nothing =
+    throw ApiException(HttpStatusCode.Conflict, "INVITE_USED", "This invite has already been used")
+
 /**
- * An OWNER creates single-use invite links; any signed-in user previews and accepts one. An unknown or malformed token
- * is a 404; a known one previews with its state, and accepting it answers 409 `INVITE_USED` once used and 410
- * `INVITE_EXPIRED` once expired. Every invite route counts against [SENSITIVE_LIMIT]: tokens cannot be guessed at
- * speed, nor invites minted in bulk.
+ * An OWNER creates single-use invite links, lists the pending ones (never their tokens) and revokes one; any signed-in
+ * user previews and accepts one. An unknown or malformed token is a 404; a known one previews with its state, and
+ * accepting it answers 409 `INVITE_USED` once used, 410 `INVITE_REVOKED` once revoked and 410 `INVITE_EXPIRED` once
+ * expired. Revoking a used invite is a 409 `INVITE_USED`; an invite id of another space, or no UUID, is a 404. Every
+ * invite route counts against [SENSITIVE_LIMIT]: tokens cannot be guessed at speed, nor invites minted in bulk.
  */
 fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
     rateLimit(SENSITIVE_LIMIT) {
@@ -37,6 +44,22 @@ fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
             if (role == Role.OWNER) badRequest("The owner role cannot be granted")
             call.respond(HttpStatusCode.Created, invites.create(membership.spaceId, membership.userId, role))
         }
+        get("/api/v1/spaces/{id}/invites") {
+            val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
+            call.respond(invites.pending(membership.spaceId))
+        }
+        delete("/api/v1/spaces/{id}/invites/{inviteId}") {
+            val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
+            val inviteId = uuidOrNull(call.parameters["inviteId"].orEmpty()) ?: notFound()
+            when (invites.revoke(membership.spaceId, inviteId)) {
+                RevokeResult.REVOKED -> {
+                    call.application.log.info("Invite revoked")
+                    call.respond(HttpStatusCode.NoContent)
+                }
+                RevokeResult.USED -> inviteUsed()
+                RevokeResult.NOT_FOUND -> notFound()
+            }
+        }
         post("/api/v1/invites/preview") {
             call.requireUser()
             call.respond(invites.preview(call.receive<InviteToken>().token) ?: notFound())
@@ -45,8 +68,9 @@ fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
             val user = call.requireUser()
             val spaceId = when (val result = invites.accept(call.receive<InviteToken>().token, user, spaces)) {
                 null -> notFound()
-                AcceptResult.Used ->
-                    throw ApiException(HttpStatusCode.Conflict, "INVITE_USED", "This invite has already been used")
+                AcceptResult.Used -> inviteUsed()
+                AcceptResult.Revoked ->
+                    throw ApiException(HttpStatusCode.Gone, "INVITE_REVOKED", "This invite has been revoked")
                 AcceptResult.Expired ->
                     throw ApiException(HttpStatusCode.Gone, "INVITE_EXPIRED", "This invite has expired")
                 is AcceptResult.Joined -> result.spaceId
