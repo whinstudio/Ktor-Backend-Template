@@ -1,7 +1,9 @@
 package io.cmpose.backendtemplate.openapi
 
-import io.cmpose.backendtemplate.feature.sample.MAX_NOTE
-import io.cmpose.backendtemplate.feature.sample.MAX_TITLE
+// cmpose:sample
+import io.cmpose.backendtemplate.feature.sample.itemPaths
+import io.cmpose.backendtemplate.feature.sample.itemSchemas
+// /cmpose:sample
 import io.cmpose.backendtemplate.sharing.MAX_SPACE_NAME
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpStatusCode.Companion.BadRequest
@@ -32,45 +34,42 @@ import kotlinx.serialization.json.putJsonObject
  * are relative to the `/api/v1` server, and `OpenApiTest` checks that every `$ref` resolves.
  */
 
-private const val MAX_PAGE = 200
-private const val DEFAULT_PAGE = 50
-
 private fun ref(kind: String, name: String) = buildJsonObject { put("\$ref", "#/components/$kind/$name") }
 
-private fun schema(name: String) = ref("schemas", name)
+internal fun schema(name: String) = ref("schemas", name)
 
 private fun json(schema: JsonElement) = buildJsonObject {
     putJsonObject("application/json") { put("schema", schema) }
 }
 
-private fun jsonBody(schema: JsonElement) = buildJsonObject {
+internal fun jsonBody(schema: JsonElement) = buildJsonObject {
     put("required", true)
     put("content", json(schema))
 }
 
-private fun arrayOf(items: JsonElement) = buildJsonObject {
+internal fun arrayOf(items: JsonElement) = buildJsonObject {
     put("type", "array")
     put("items", items)
 }
 
-private fun string(format: String? = null, description: String? = null) = buildJsonObject {
+internal fun string(format: String? = null, description: String? = null) = buildJsonObject {
     put("type", "string")
     format?.let { put("format", it) }
     description?.let { put("description", it) }
 }
 
-private fun uuid(description: String? = null) = string("uuid", description)
+internal fun uuid(description: String? = null) = string("uuid", description)
 
-private fun int64(description: String? = null) = buildJsonObject {
+internal fun int64(description: String? = null) = buildJsonObject {
     put("type", "integer")
     put("format", "int64")
     description?.let { put("description", it) }
 }
 
-private fun JsonObject.nullable() = JsonObject(this + ("nullable" to JsonPrimitive(true)))
+internal fun JsonObject.nullable() = JsonObject(this + ("nullable" to JsonPrimitive(true)))
 
 /** An object schema: [required] names, [properties] from the block; unknown fields are refused when [closed]. */
-private fun objectOf(
+internal fun objectOf(
     required: List<String>,
     closed: Boolean = false,
     properties: JsonObjectBuilder.() -> Unit,
@@ -82,7 +81,7 @@ private fun objectOf(
 }
 
 /** One operation; [responses] maps each status to a description and schema ([returns]) or an error ([fails]). */
-private fun operation(
+internal fun operation(
     summary: String,
     requestBody: JsonObject? = null,
     parameters: JsonArray? = null,
@@ -94,7 +93,7 @@ private fun operation(
     putJsonObject("responses", responses)
 }
 
-private fun JsonObjectBuilder.returns(status: HttpStatusCode, description: String, body: JsonElement? = null) {
+internal fun JsonObjectBuilder.returns(status: HttpStatusCode, description: String, body: JsonElement? = null) {
     putJsonObject(status.value.toString()) {
         put("description", description)
         body?.let { put("content", json(it)) }
@@ -102,7 +101,7 @@ private fun JsonObjectBuilder.returns(status: HttpStatusCode, description: Strin
 }
 
 /** The shared error responses for [statuses]: 400, 401 and 404 have their own; anything else is the plain one. */
-private fun JsonObjectBuilder.fails(vararg statuses: HttpStatusCode) {
+internal fun JsonObjectBuilder.fails(vararg statuses: HttpStatusCode) {
     statuses.forEach { status ->
         val name = when (status) {
             BadRequest -> "BadRequest"
@@ -114,7 +113,7 @@ private fun JsonObjectBuilder.fails(vararg statuses: HttpStatusCode) {
     }
 }
 
-private fun pathParameters(vararg names: String) = buildJsonArray { names.forEach { add(ref("parameters", it)) } }
+internal fun pathParameters(vararg names: String) = buildJsonArray { names.forEach { add(ref("parameters", it)) } }
 
 private fun JsonObjectBuilder.accountPaths() {
     putJsonObject("/me") {
@@ -167,60 +166,6 @@ private fun JsonObjectBuilder.filePaths() {
     }
 }
 
-private fun queryParameter(name: String, schema: JsonObject, description: String? = null) = buildJsonObject {
-    put("name", name)
-    put("in", "query")
-    description?.let { put("description", it) }
-    put("schema", schema)
-}
-
-private fun JsonObjectBuilder.itemPaths() {
-    val listParameters = buildJsonArray {
-        add(queryParameter("limit", buildJsonObject {
-            put("type", "integer")
-            put("minimum", 1)
-            put("maximum", MAX_PAGE)
-            put("default", DEFAULT_PAGE)
-        }))
-        add(queryParameter("cursor", string(), "The nextCursor of the previous page"))
-        // cmpose:sharing
-        add(queryParameter("spaceId", uuid(), "The space to list; else the personal space (VIEWER or above)"))
-        // /cmpose:sharing
-    }
-    putJsonObject("/items") {
-        put("get", operation("Lists items newest first, a page at a time", parameters = listParameters) {
-            returns(OK, "One page", schema("ItemPage"))
-            fails(BadRequest, Unauthorized)
-            // cmpose:sharing
-            fails(NotFound)
-            // /cmpose:sharing
-        })
-        put("post", operation("Creates an item", jsonBody(schema("ItemDraft"))) {
-            returns(Created, "Created", schema("Item"))
-            fails(BadRequest, Unauthorized)
-            // cmpose:sharing
-            fails(NotFound)
-            // /cmpose:sharing
-        })
-    }
-    putJsonObject("/items/{id}") {
-        put("parameters", pathParameters("Id"))
-        put("get", operation("Reads an item") {
-            returns(OK, "The item", schema("Item"))
-            fails(Unauthorized, NotFound)
-        })
-        val patch = jsonBody(schema("ItemPatch"))
-        put("patch", operation("Changes the fields the body names; null clears note or dueDate", patch) {
-            returns(OK, "The changed item", schema("Item"))
-            fails(BadRequest, Unauthorized, NotFound)
-        })
-        put("delete", operation("Deletes an item") {
-            returns(NoContent, "Deleted")
-            fails(Unauthorized, NotFound)
-        })
-    }
-}
-
 private fun JsonObjectBuilder.errorSchema() {
     val field = objectOf(listOf("field", "message")) {
         put("field", string())
@@ -248,65 +193,6 @@ private fun JsonObjectBuilder.accountSchemas() {
     })
 }
 
-private fun title() = buildJsonObject {
-    put("type", "string")
-    put("minLength", 1)
-    put("maxLength", MAX_TITLE)
-    put("description", "Trimmed before the length check")
-}
-
-private fun note() = buildJsonObject {
-    put("type", "string")
-    put("maxLength", MAX_NOTE)
-    put("nullable", true)
-}
-
-private fun dueDate() = buildJsonObject {
-    put("type", "integer")
-    put("format", "int64")
-    put("minimum", 0)
-    put("nullable", true)
-    put("description", "Epoch milliseconds")
-}
-
-private fun JsonObjectBuilder.itemSchemas() {
-    val itemFields = buildList {
-        add("id")
-        // cmpose:sharing
-        add("spaceId")
-        // /cmpose:sharing
-        addAll(listOf("title", "note", "dueDate", "createdAt", "updatedAt"))
-    }
-    put("Item", objectOf(itemFields) {
-        put("id", uuid())
-        // cmpose:sharing
-        put("spaceId", uuid())
-        // /cmpose:sharing
-        put("title", string())
-        put("note", string().nullable())
-        put("dueDate", int64("Epoch milliseconds").nullable())
-        put("createdAt", int64())
-        put("updatedAt", int64())
-    })
-    put("ItemPage", objectOf(listOf("items", "nextCursor")) {
-        put("items", arrayOf(schema("Item")))
-        put("nextCursor", string(description = "Null on the last page").nullable())
-    })
-    put("ItemDraft", objectOf(listOf("title"), closed = true) {
-        put("title", title())
-        put("note", note())
-        put("dueDate", dueDate())
-        // cmpose:sharing
-        put("spaceId", uuid("The space to create in; the personal space when left out (EDITOR or above)"))
-        // /cmpose:sharing
-    })
-    put("ItemPatch", objectOf(emptyList(), closed = true) {
-        put("title", title())
-        put("note", note())
-        put("dueDate", dueDate())
-    })
-}
-
 // cmpose:sharing
 private fun JsonObjectBuilder.sharingPaths() {
     putJsonObject("/spaces") {
@@ -325,6 +211,7 @@ private fun JsonObjectBuilder.sharingPaths() {
             returns(OK, "The renamed space", schema("Space"))
             fails(BadRequest, Unauthorized, NotFound)
         })
+        // cmpose:sample-off: put("delete", operation("Deletes a space with its members, invites and files (OWNER)") {
         put("delete", operation("Deletes a space with its members, invites, files and items (OWNER)") {
             returns(NoContent, "Deleted")
             fails(BadRequest, Unauthorized, NotFound)
@@ -450,7 +337,9 @@ private fun JsonObjectBuilder.components() {
     putJsonObject("schemas") {
         errorSchema()
         accountSchemas()
+        // cmpose:sample
         itemSchemas()
+        // /cmpose:sample
         // cmpose:sharing
         sharingSchemas()
         // /cmpose:sharing
@@ -469,7 +358,9 @@ internal fun openApiSpec(): JsonObject = buildJsonObject {
     putJsonObject("paths") {
         accountPaths()
         filePaths()
+        // cmpose:sample
         itemPaths()
+        // /cmpose:sample
         // cmpose:sharing
         sharingPaths()
         // /cmpose:sharing

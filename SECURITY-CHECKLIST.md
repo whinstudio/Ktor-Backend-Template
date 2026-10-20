@@ -1,7 +1,9 @@
 # Security checklist for a new feature
 
-Short rules for adding a record type or a route. The sample feature (`feature/sample`, `V3__sample.sql` and its tests)
-follows every one of them: copy its shape.
+Short rules for adding a record type or a route.
+<!-- cmpose:sample -->
+The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows every one of them: copy its shape.
+<!-- /cmpose:sample -->
 
 ## Access
 
@@ -72,12 +74,14 @@ follows every one of them: copy its shape.
 
 ## Tests
 
-1. Every route gets an IDOR test: another user's GET, PATCH and DELETE answer 404 and change nothing (`IdorTest`).
+1. Every route gets an IDOR test: another user's GET, PATCH and DELETE answer 404 and change nothing.
 <!-- cmpose:sharing -->
 1. With sharing, also a VIEWER's write and a member of another space, both 404.
 <!-- /cmpose:sharing -->
-1. Every validation rule gets a negative test: empty, too long, wrong type, unknown and server-owned fields
-   (`ValidationTest`).
+1. Every validation rule gets a negative test: empty, too long, wrong type, unknown and server-owned fields.
+<!-- cmpose:sample -->
+1. The sample feature has both kinds: `feature/sample/ItemIdorTest` and `feature/sample/ItemValidationTest`.
+<!-- /cmpose:sample -->
 1. Keep the API description (`openapi/OpenApiSpec.kt`) in step with the routes; `OpenApiTest` checks the path list
    and that every `$ref` resolves. Run `./gradlew test detekt` before shipping.
 

@@ -1,8 +1,11 @@
 # Cmpose Backend
 
 A production-ready Kotlin/Ktor backend for a mobile app: Firebase sign-in verified on the server, PostgreSQL with
-Flyway migrations, file uploads, account deletion, one sample feature to copy, and the parts to deploy it as one
-container behind a shared nginx and PostgreSQL.
+Flyway migrations, file uploads, account deletion, and the parts to deploy it as one container behind a shared nginx
+and PostgreSQL.
+<!-- cmpose:sample -->
+One sample feature shows the shape to copy.
+<!-- /cmpose:sample -->
 
 - Kotlin on JVM 21, Ktor, Exposed, Flyway, PostgreSQL, HikariCP, logback.
 - Sign-in: the app signs in with Firebase; the server checks each ID token's signature against Google's public keys,
@@ -18,7 +21,9 @@ container behind a shared nginx and PostgreSQL.
 | `src/main/kotlin/.../plugins` | errors, security headers, CORS, body limits, rate limits, request ids, client version |
 | `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me` |
 | `src/main/kotlin/.../files` | uploads (type read from the bytes) and downloads |
+<!-- cmpose:sample -->
 | `src/main/kotlin/.../feature/sample` | the sample feature (`/api/v1/items`): the shape to copy |
+<!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
 | `src/main/kotlin/.../sharing` | spaces, roles and invitations |
 <!-- /cmpose:sharing -->
@@ -79,10 +84,14 @@ invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWOR
 
 ## Add a feature
 
-Copy the sample feature: `feature/sample` (table, repository, routes, DTOs), its migration `V3__sample.sql` and its
-tests. Then go through [`SECURITY-CHECKLIST.md`](SECURITY-CHECKLIST.md): authorization on every route, the owner filter
-in every query, validation at the boundary, deletion with the account, rate limits, logs without personal data, and the
-IDOR and validation tests. Add the routes to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
+Copy the shape of `files/` (repository, routes, migration, tests) and go through `SECURITY-CHECKLIST.md`.
+<!-- cmpose:sample -->
+A plain record type can start from the sample feature instead: `feature/sample` (table, repository, routes, DTOs), its
+migration `V3__sample.sql` and its tests.
+<!-- /cmpose:sample -->
+The checklist covers authorization on every route, the owner filter in every query, validation at the boundary,
+deletion with the account, rate limits, logs without personal data, and the IDOR and validation tests. Add the routes
+to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
 
 ## Deploy
 

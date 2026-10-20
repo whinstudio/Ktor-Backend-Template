@@ -68,7 +68,9 @@ fun Application.module(deps: AppDeps) {
     // cmpose:sharing-off: val users = deps.db?.let(::UserRepository)
     val users = deps.db?.let { db -> UserRepository(db, onCreated = { SpaceRepository(db).personalSpace(it) }) }
     val files = deps.db?.let(::FileRepository)
+    // cmpose:sample
     val items = deps.db?.let(::ItemRepository)
+    // /cmpose:sample
     if (users != null) {
         val verifier = FirebaseTokenVerifier(deps.jwkProvider, config.firebaseProjectId, config.jwtClockSkewSeconds)
         installUserAuth(UserAuth(verifier, users))
@@ -79,14 +81,16 @@ fun Application.module(deps: AppDeps) {
         openApiRoutes(config.publicBaseUrl)
         // Without a database only the health routes and the API description exist (some tests build the app that way).
         // Every repository exists exactly when the database does; the checks only unwrap them.
-        // cmpose:sharing-off: if (users != null && files != null && items != null) {
-        if (users != null && files != null && items != null && spaces != null) {
+        // cmpose:sharing-off: if (users != null && files != null) {
+        if (users != null && files != null && spaces != null) {
             // cmpose:sharing-off: userRoutes(users, files, deps.fileStore)
             userRoutes(users, files, deps.fileStore, spaces)
             // cmpose:sharing-off: fileRoutes(files, deps.fileStore, config.maxUploadBytes, config.maxConcurrentUploads)
             fileRoutes(files, deps.fileStore, config.maxUploadBytes, config.maxConcurrentUploads, spaces)
-            // cmpose:sharing-off: itemRoutes(items)
-            itemRoutes(items, spaces)
+            // cmpose:sample
+            // cmpose:sharing-off: items?.let { itemRoutes(it) }
+            items?.let { itemRoutes(it, spaces) }
+            // /cmpose:sample
             // cmpose:sharing
             spaceRoutes(spaces, deps.fileStore)
             memberRoutes(spaces)

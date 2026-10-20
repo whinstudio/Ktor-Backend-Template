@@ -17,6 +17,7 @@ class MigrationTest {
             }
             names
         }
+        // cmpose:sample-off: val core = listOf("files", "flyway_schema_history", "user_identities", "users")
         val core = listOf("files", "flyway_schema_history", "items", "user_identities", "users")
         // cmpose:sharing-off: val expected = core
         val expected = (core + listOf("invites", "space_members", "spaces")).sorted()
