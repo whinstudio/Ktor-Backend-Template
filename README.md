@@ -48,6 +48,8 @@ and the tests.
 
 - `localServerDir=<path>` in `gradle.properties` (or `-PlocalServerDir=<path>`) moves the folder; the path is relative
   to this project. `runLocal` and `resetLocal` both use it, and the config file is then `<path>/config.properties`.
+  The folder holds the local database and config, so it must stay git-ignored; it may not be this project or a folder
+  that contains it.
 - `./gradlew writeOpenApi` writes the API description the server serves to `build/openapi/openapi.json`.
 
 ## API conventions
@@ -57,7 +59,7 @@ and the tests.
 - Every error has one shape, with `fields` only for validation errors:
 
   ```json
-  {"error":{"code":"BAD_REQUEST","message":"Invalid item","requestId":"…","fields":[{"field":"title","message":"…"}]}}
+  {"error":{"code":"BAD_REQUEST","message":"Invalid display name","requestId":"…","fields":[{"field":"displayName","message":"…"}]}}
   ```
 
   Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
@@ -88,11 +90,12 @@ invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWOR
 
 ## Add a feature
 
-Copy the shape of `files/` (repository, routes, migration, tests) and go through `SECURITY-CHECKLIST.md`.
 <!-- cmpose:sample -->
-A plain record type can start from the sample feature instead: `feature/sample` (table, repository, routes, DTOs), its
-migration `V3__sample.sql` and its tests.
+Start a plain record type from the sample feature: `feature/sample` (table, repository, routes, DTOs), its migration
+`V3__sample.sql` and its tests. For any other feature:
 <!-- /cmpose:sample -->
+Copy the shape of `files/` (repository, routes, migration, tests) and go through
+[SECURITY-CHECKLIST.md](SECURITY-CHECKLIST.md).
 The checklist covers authorization on every route, the owner filter in every query, validation at the boundary,
 deletion with the account, rate limits, logs without personal data, and the IDOR and validation tests. Add the routes
 to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
