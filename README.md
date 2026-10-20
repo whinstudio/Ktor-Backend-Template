@@ -46,6 +46,10 @@ Needs JDK 21. The local server keeps everything in `.local-server/` (git-ignored
 `./gradlew resetLocal` deletes `.local-server/` (database, files and settings). `./gradlew build` compiles, runs detekt
 and the tests.
 
+- `localServerDir=<path>` in `gradle.properties` (or `-PlocalServerDir=<path>`) moves the folder; the path is relative
+  to this project. `runLocal` and `resetLocal` both use it, and the config file is then `<path>/config.properties`.
+- `./gradlew writeOpenApi` writes the API description the server serves to `build/openapi/openapi.json`.
+
 ## API conventions
 
 - All routes are under `/api/v1` except `/health` (liveness) and `/ready` (the database answers). The API description

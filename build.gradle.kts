@@ -74,11 +74,12 @@ sourceSets.test {
     runtimeClasspath += local.output
 }
 
-val localServerDir = layout.projectDirectory.dir(".local-server")
+// The local server's folder, relative to this project: `localServerDir=<path>` in gradle.properties or -PlocalServerDir=.
+val localServerDir = layout.projectDirectory.dir(providers.gradleProperty("localServerDir").getOrElse(".local-server"))
 
 tasks.register<JavaExec>("runLocal") {
     group = "application"
-    description = "Runs the server on 127.0.0.1 with an embedded PostgreSQL kept in .local-server/"
+    description = "Runs the server on 127.0.0.1 with an embedded PostgreSQL kept in .local-server/ (or localServerDir)"
     classpath = local.runtimeClasspath
     mainClass.set("io.cmpose.backendtemplate.local.LocalMainKt")
     args(localServerDir.asFile.absolutePath)
@@ -86,8 +87,20 @@ tasks.register<JavaExec>("runLocal") {
 
 tasks.register<Delete>("resetLocal") {
     group = "application"
-    description = "Deletes .local-server/ (database, files and config)"
+    description = "Deletes .local-server/ or localServerDir (database, files and config)"
     delete(localServerDir)
+}
+
+// The API description the server serves at /api/v1/openapi.json, as a file for contract checks.
+val openApiFile = layout.buildDirectory.file("openapi/openapi.json")
+
+tasks.register<JavaExec>("writeOpenApi") {
+    group = "documentation"
+    description = "Writes the OpenAPI document to build/openapi/openapi.json"
+    classpath = local.runtimeClasspath
+    mainClass.set("io.cmpose.backendtemplate.local.OpenApiDumpKt")
+    args(openApiFile.get().asFile.absolutePath)
+    outputs.file(openApiFile)
 }
 
 detekt {
