@@ -103,9 +103,11 @@ class ProfileRoutesTest {
         val response = client.profile(alice, ProfileUpdate(displayName = "Ada", personalSpaceName = ""))
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertEquals("BAD_REQUEST", response.errorCode())
-        assertEquals(listOf("name"), response.errorFields())
+        assertEquals(listOf("personalSpaceName"), response.errorFields())
         assertNull(client.displayName(alice))
-        assertEquals(HttpStatusCode.BadRequest, client.profile(alice, ProfileUpdate(personalSpaceName = "a".repeat(81))).status)
+        val tooLong = client.profile(alice, ProfileUpdate(personalSpaceName = "a".repeat(81)))
+        assertEquals(HttpStatusCode.BadRequest, tooLong.status)
+        assertEquals(listOf("personalSpaceName"), tooLong.errorFields())
     }
 
     @Test

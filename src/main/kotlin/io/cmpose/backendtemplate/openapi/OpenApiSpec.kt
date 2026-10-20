@@ -278,7 +278,8 @@ private fun JsonObjectBuilder.sharingPaths() {
         })
     }
     putJsonObject("/invites/accept") {
-        put("post", operation("Joins the invite's space", jsonBody(schema("InviteToken"))) {
+        val summary = "Joins the invite's space; a used invite is 409 INVITE_USED, an expired one 410 INVITE_EXPIRED"
+        put("post", operation(summary, jsonBody(schema("InviteToken"))) {
             returns(OK, "The joined space", schema("Space"))
             fails(BadRequest, Unauthorized, NotFound, Conflict, Gone, TooManyRequests)
         })

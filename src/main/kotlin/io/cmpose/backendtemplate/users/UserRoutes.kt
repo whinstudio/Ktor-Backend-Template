@@ -69,7 +69,7 @@ fun Route.userRoutes(
         val update = call.receive<ProfileUpdate>()
         val name = displayName(update.displayName)
         // cmpose:sharing
-        val personalName = update.personalSpaceName?.let(::spaceName)
+        val personalName = update.personalSpaceName?.let { spaceName(it, field = "personalSpaceName") }
         // /cmpose:sharing
         users.setDisplayName(user, name)
         // cmpose:sharing

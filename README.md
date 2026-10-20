@@ -64,8 +64,11 @@ and the tests.
 
   Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
   `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
-  `UPLOADS_BUSY`. A 500 carries no
-  detail beyond the request id.
+  `UPLOADS_BUSY`. A 500 carries no detail beyond the request id.
+<!-- cmpose:sharing -->
+  With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
+  (409, already used) and `INVITE_EXPIRED` (410).
+<!-- /cmpose:sharing -->
 - Headers:
   - Every response has `X-App-Version` (`APP_VERSION`) and `X-Request-Id`: the client's own id when it sends a safe
     one (letters, digits, `-`, `_`, `.`, at most 128 characters), else a generated one. Quote it when reporting a

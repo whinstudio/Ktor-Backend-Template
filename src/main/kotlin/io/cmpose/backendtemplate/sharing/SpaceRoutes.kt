@@ -22,11 +22,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class SpaceDraft(val name: String)
 
-/** [name] trimmed, or 400 when it is blank or longer than [MAX_SPACE_NAME]. */
-internal fun spaceName(name: String): String {
+/**
+ * [name] trimmed, or 400 when it is blank or longer than [MAX_SPACE_NAME]; the error's `fields` names [field], the
+ * body's own field (`name` here, `personalSpaceName` in the profile).
+ */
+internal fun spaceName(name: String, field: String = "name"): String {
     val trimmed = name.trim()
     if (trimmed.isEmpty() || trimmed.length > MAX_SPACE_NAME) {
-        badRequest("Invalid name", listOf(FieldError("name", "must be 1 to $MAX_SPACE_NAME characters")))
+        badRequest("Invalid name", listOf(FieldError(field, "must be 1 to $MAX_SPACE_NAME characters")))
     }
     return trimmed
 }
