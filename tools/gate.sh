@@ -106,7 +106,7 @@ check "sharing paths exist" sharing_paths_exist
 for variant in on off; do
     dir="$work/$variant"
     check "$variant: copy" copy "$dir"
-    check "$variant: resolve markers" bash "$dir/tools/resolve-markers.sh" "$dir" "$variant"
+    check "$variant: resolve markers" bash "$dir/tools/resolve-markers.sh" "$dir" sharing "$variant"
     check "$variant: no marker left" no_markers_left "$dir"
     [ "$variant" == "off" ] && check "$variant: no sharing words" no_sharing_words "$dir"
     check "$variant: gradle build" gradle_build "$dir"
