@@ -345,6 +345,33 @@ class FileRoutesTest {
         assertEquals(2L, rowCount())
         assertEquals(2, dir.listDirectoryEntries().size)
     }
+
+    @Test
+    fun crossEditorUploadsDoNotDeadlock() {
+        // A deadlock would not show in the answers: the losing transaction is retried (and logged), then passes.
+        val logs = capturedLogs {
+            testApplication {
+                val store = PairedStore(LocalDiskFileStore(dir))
+                val config = testConfig().copy(filesDir = dir.toString(), maxStorageBytesPerUser = 1000)
+                application { module(AppDeps(config, TestKeys.jwkProvider, TestDb.database, store)) }
+                val client = jsonClient()
+                val aliceSpace = client.sharedSpace(alice, "Alice's", bob to Role.EDITOR)
+                val bobSpace = client.sharedSpace(bob, "Bob's", alice to Role.EDITOR)
+                // Each upload locks the other's quota row, and its insert's foreign key then checks its uploader's.
+                store.paired = true
+                val responses = coroutineScope {
+                    awaitAll(
+                        async { client.upload(alice, pngOf(300), spaceId = bobSpace.id) },
+                        async { client.upload(bob, pngOf(300), spaceId = aliceSpace.id) },
+                    )
+                }
+                assertEquals(listOf(HttpStatusCode.Created, HttpStatusCode.Created), responses.map { it.status })
+            }
+        }
+        assertEquals(2L, rowCount())
+        assertTrue(logs.none { it.fullText().contains("deadlock detected") })
+    }
+
     // /cmpose:sharing
 
     /** Holds every write until [release] opens; [entered] completes once a write waits, i.e. an upload holds a permit. */
