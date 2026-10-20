@@ -56,9 +56,15 @@ data class SpaceResponse(
     val memberCount: Int,
 )
 
-/** A member of a space; [email] is their verified email, if any. */
+/** A member of a space; [displayName] is the name they chose to show and [email] their verified email, if any. */
 @Serializable
-data class MemberResponse(val userId: String, val email: String?, val role: Role, val joinedAt: Long)
+data class MemberResponse(
+    val userId: String,
+    val displayName: String?,
+    val email: String?,
+    val role: Role,
+    val joinedAt: Long,
+)
 
 /** What a role change or a removal did. */
 enum class MemberChange { DONE, NOT_MEMBER, LAST_OWNER }
@@ -160,10 +166,18 @@ class SpaceRepository(private val db: Database) {
     /** The members: owners first, then in the order they joined. */
     fun members(spaceId: UUID): List<MemberResponse> = transaction(db) {
         val rows = SpaceMembers.selectAll().where { SpaceMembers.spaceId eq spaceId }.toList()
-        val emails = emailsOf(rows.map { it[SpaceMembers.userId] })
+        val userIds = rows.map { it[SpaceMembers.userId] }
+        val names = displayNamesOf(userIds)
+        val emails = emailsOf(userIds)
         rows.map {
             val user = it[SpaceMembers.userId]
-            MemberResponse(user.toString(), emails[user], roleOf(it[SpaceMembers.role]), it[SpaceMembers.joinedAt])
+            MemberResponse(
+                userId = user.toString(),
+                displayName = names[user],
+                email = emails[user],
+                role = roleOf(it[SpaceMembers.role]),
+                joinedAt = it[SpaceMembers.joinedAt],
+            )
         }.sortedWith(
             compareByDescending<MemberResponse> { it.role == Role.OWNER }.thenBy { it.joinedAt }.thenBy { it.userId },
         )
@@ -220,6 +234,14 @@ class SpaceRepository(private val db: Database) {
             .where { SpaceMembers.spaceId inList spaceIds }
             .groupBy(SpaceMembers.spaceId)
             .associate { it[SpaceMembers.spaceId] to it[count].toInt() }
+    }
+
+    // The display names that are set, as UserRepository.displayName reports them.
+    private fun displayNamesOf(users: List<UUID>): Map<UUID, String> {
+        if (users.isEmpty()) return emptyMap()
+        return Users.select(Users.id, Users.displayName)
+            .where { (Users.id inList users) and Users.displayName.isNotNull() }
+            .associate { it[Users.id] to it[Users.displayName]!! }
     }
 
     // The first email by provider, as UserRepository.email reports it.

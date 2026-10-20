@@ -21,11 +21,16 @@ value class UserId(val value: UUID) {
     override fun toString() = value.toString()
 }
 
+/** Longest display name after trimming. */
+const val MAX_DISPLAY_NAME = 80
+
 // Mirror db/migration/V1__core.sql; Flyway owns the schema, these objects only describe it to Exposed.
 
 object Users : Table("users") {
     val id = uuid("id")
     val createdAt = long("created_at")
+    /** Added by V4__profile.sql. */
+    val displayName = text("display_name").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -87,6 +92,16 @@ class UserRepository(
             .orderBy(UserIdentities.provider to SortOrder.ASC)
             .firstOrNull()
             ?.get(UserIdentities.email)
+    }
+
+    /** The name [user] chose to show, or null when they have not set one. */
+    fun displayName(user: UserId): String? = transaction(db) {
+        Users.select(Users.displayName).where { Users.id eq user.value }.firstOrNull()?.get(Users.displayName)
+    }
+
+    /** Sets (or, with null, clears) [user]'s display name; the caller has trimmed and checked it. */
+    fun setDisplayName(user: UserId, name: String?) {
+        transaction(db) { Users.update({ Users.id eq user.value }) { it[displayName] = name } }
     }
 
     /**

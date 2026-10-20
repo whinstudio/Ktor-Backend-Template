@@ -29,7 +29,7 @@ import kotlin.test.assertNull
 /** The first valid token creates our own user (a UUID) and maps the Firebase uid to it; later tokens reuse it. */
 class UserBootstrapTest {
     @Serializable
-    private data class Me(val id: String, val email: String?)
+    private data class Me(val id: String, val email: String?, val displayName: String?)
 
     @BeforeTest
     fun clean() {

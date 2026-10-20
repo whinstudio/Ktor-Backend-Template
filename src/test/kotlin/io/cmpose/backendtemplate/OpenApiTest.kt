@@ -77,7 +77,7 @@ class OpenApiTest {
     @Test
     fun listsEveryRouteAndNothingElse() {
         val expected = buildSet {
-            addAll(listOf("/me", "/files", "/files/{id}"))
+            addAll(listOf("/me", "/me/profile", "/files", "/files/{id}"))
             // cmpose:sample
             addAll(listOf("/items", "/items/{id}"))
             // /cmpose:sample

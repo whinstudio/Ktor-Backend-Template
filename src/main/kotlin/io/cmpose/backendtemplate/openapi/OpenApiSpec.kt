@@ -3,6 +3,7 @@ package io.cmpose.backendtemplate.openapi
 import io.cmpose.backendtemplate.feature.sample.itemPaths
 import io.cmpose.backendtemplate.feature.sample.itemSchemas
 import io.cmpose.backendtemplate.sharing.MAX_SPACE_NAME
+import io.cmpose.backendtemplate.users.MAX_DISPLAY_NAME
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpStatusCode.Companion.BadRequest
 import io.ktor.http.HttpStatusCode.Companion.Conflict
@@ -124,6 +125,12 @@ private fun JsonObjectBuilder.accountPaths() {
             fails(Unauthorized, TooManyRequests)
         })
     }
+    putJsonObject("/me/profile") {
+        put("put", operation("Sets the caller's profile", jsonBody(schema("ProfileUpdate"))) {
+            returns(NoContent, "Saved")
+            fails(BadRequest, Unauthorized)
+        })
+    }
 }
 
 private fun JsonObjectBuilder.filePaths() {
@@ -183,6 +190,22 @@ private fun JsonObjectBuilder.accountSchemas() {
     put("Me", objectOf(listOf("id")) {
         put("id", uuid())
         put("email", string(description = "The verified email, else null").nullable())
+        put("displayName", string(description = "The name the user chose to show, else null").nullable())
+    })
+    put("ProfileUpdate", objectOf(emptyList(), closed = true) {
+        put("displayName", buildJsonObject {
+            put("type", "string")
+            put("maxLength", MAX_DISPLAY_NAME)
+            put("description", "Trimmed; null or blank clears the display name")
+        }.nullable())
+        // cmpose:sharing
+        put("personalSpaceName", buildJsonObject {
+            put("type", "string")
+            put("minLength", 1)
+            put("maxLength", MAX_SPACE_NAME)
+            put("description", "Trimmed; renames the personal space, null leaves it as it is")
+        }.nullable())
+        // /cmpose:sharing
     })
     put("File", objectOf(listOf("id", "mime", "size")) {
         put("id", uuid())
@@ -280,8 +303,9 @@ private fun JsonObjectBuilder.sharingSchemas() {
             put("maxLength", MAX_SPACE_NAME)
         })
     })
-    put("Member", objectOf(listOf("userId", "email", "role", "joinedAt")) {
+    put("Member", objectOf(listOf("userId", "displayName", "email", "role", "joinedAt")) {
         put("userId", uuid())
+        put("displayName", string(description = "The name the member chose to show, else null").nullable())
         put("email", string(description = "The verified email, else null").nullable())
         put("role", schema("Role"))
         put("joinedAt", int64())

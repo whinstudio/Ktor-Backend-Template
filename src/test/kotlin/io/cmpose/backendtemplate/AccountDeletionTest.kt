@@ -26,7 +26,7 @@ import kotlin.test.assertNotEquals
 
 class AccountDeletionTest {
     @Serializable
-    private data class Me(val id: String, val email: String?)
+    private data class Me(val id: String, val email: String?, val displayName: String?)
 
     @Serializable
     private data class Uploaded(val id: String, val mime: String, val size: Long)

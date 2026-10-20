@@ -19,7 +19,7 @@ One sample feature shows the shape to copy.
 |------|------|
 | `src/main/kotlin/.../config` | `AppConfig`: every setting, read from the environment |
 | `src/main/kotlin/.../plugins` | errors, security headers, CORS, body limits, rate limits, request ids, client version |
-| `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me` |
+| `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me`, the profile (`PUT /api/v1/me/profile`: display name) |
 | `src/main/kotlin/.../files` | uploads (type read from the bytes) and downloads |
 <!-- cmpose:sample -->
 | `src/main/kotlin/.../feature/sample` | the sample feature (`/api/v1/items`): the shape to copy |
