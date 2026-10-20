@@ -47,6 +47,8 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
    to them goes. A column naming who added a row is `REFERENCES users(id) ON DELETE SET NULL` (as `files.uploaded_by`),
    never `CASCADE`, which would delete shared data, and never a copied name or email, which would outlive the account
    (`SharingDeletionTest`). The privacy notes in `deploy/README.md` say so; keep the app's privacy policy in step.
+1. An invite preview shows whoever holds the token the space name, the role and the inviter's display name, and keeps
+   showing them after the invite is used or expires; only an unknown token is a 404. Add nothing else to the preview.
 <!-- /cmpose:sharing -->
 1. Schema changes are new Flyway migrations (`V<n>__<name>.sql`); never edit one that has run anywhere.
 1. Responses are DTOs built for the client. Never serialize table rows or internal objects, and never return another

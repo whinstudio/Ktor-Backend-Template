@@ -8,6 +8,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpStatusCode.Companion.BadRequest
 import io.ktor.http.HttpStatusCode.Companion.Conflict
 import io.ktor.http.HttpStatusCode.Companion.Created
+import io.ktor.http.HttpStatusCode.Companion.Gone
 import io.ktor.http.HttpStatusCode.Companion.NoContent
 import io.ktor.http.HttpStatusCode.Companion.NotFound
 import io.ktor.http.HttpStatusCode.Companion.OK
@@ -279,7 +280,7 @@ private fun JsonObjectBuilder.sharingPaths() {
     putJsonObject("/invites/accept") {
         put("post", operation("Joins the invite's space", jsonBody(schema("InviteToken"))) {
             returns(OK, "The joined space", schema("Space"))
-            fails(BadRequest, Unauthorized, NotFound, TooManyRequests)
+            fails(BadRequest, Unauthorized, NotFound, Conflict, Gone, TooManyRequests)
         })
     }
 }
@@ -317,10 +318,16 @@ private fun JsonObjectBuilder.sharingSchemas() {
         put("expiresAt", int64())
     })
     put("InviteToken", objectOf(listOf("token"), closed = true) { put("token", string()) })
-    put("InvitePreview", objectOf(listOf("spaceName", "role", "expiresAt")) {
+    put("InviteState", buildJsonObject {
+        put("type", "string")
+        putJsonArray("enum") { listOf("valid", "used", "expired").forEach(::add) }
+    })
+    put("InvitePreview", objectOf(listOf("spaceName", "inviterName", "role", "expiresAt", "state")) {
         put("spaceName", string())
+        put("inviterName", string(description = "The inviter's display name, else null").nullable())
         put("role", schema("Role"))
         put("expiresAt", int64())
+        put("state", schema("InviteState"))
     })
 }
 // /cmpose:sharing

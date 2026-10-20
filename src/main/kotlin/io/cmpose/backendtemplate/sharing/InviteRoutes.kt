@@ -3,6 +3,7 @@
 package io.cmpose.backendtemplate.sharing
 
 import io.cmpose.backendtemplate.auth.requireUser
+import io.cmpose.backendtemplate.plugins.ApiException
 import io.cmpose.backendtemplate.plugins.SENSITIVE_LIMIT
 import io.cmpose.backendtemplate.plugins.badRequest
 import io.cmpose.backendtemplate.plugins.notFound
@@ -23,9 +24,10 @@ data class InviteRequest(val role: Role)
 data class InviteToken(val token: String)
 
 /**
- * An OWNER creates single-use invite links; any signed-in user previews and accepts one. An unknown, used or expired
- * token is a 404 alike. Every invite route counts against [SENSITIVE_LIMIT]: tokens cannot be guessed at speed, nor
- * invites minted in bulk.
+ * An OWNER creates single-use invite links; any signed-in user previews and accepts one. An unknown or malformed token
+ * is a 404; a known one previews with its state, and accepting it answers 409 `INVITE_USED` once used and 410
+ * `INVITE_EXPIRED` once expired. Every invite route counts against [SENSITIVE_LIMIT]: tokens cannot be guessed at
+ * speed, nor invites minted in bulk.
  */
 fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
     rateLimit(SENSITIVE_LIMIT) {
@@ -41,7 +43,14 @@ fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
         }
         post("/api/v1/invites/accept") {
             val user = call.requireUser()
-            val spaceId = invites.accept(call.receive<InviteToken>().token, user, spaces) ?: notFound()
+            val spaceId = when (val result = invites.accept(call.receive<InviteToken>().token, user, spaces)) {
+                null -> notFound()
+                AcceptResult.Used ->
+                    throw ApiException(HttpStatusCode.Conflict, "INVITE_USED", "This invite has already been used")
+                AcceptResult.Expired ->
+                    throw ApiException(HttpStatusCode.Gone, "INVITE_EXPIRED", "This invite has expired")
+                is AcceptResult.Joined -> result.spaceId
+            }
             call.respond(spaces.get(spaceId, user) ?: notFound())
         }
     }
