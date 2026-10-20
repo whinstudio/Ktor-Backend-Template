@@ -1,9 +1,7 @@
 package io.cmpose.backendtemplate.openapi
 
-// cmpose:sample
 import io.cmpose.backendtemplate.feature.sample.itemPaths
 import io.cmpose.backendtemplate.feature.sample.itemSchemas
-// /cmpose:sample
 import io.cmpose.backendtemplate.sharing.MAX_SPACE_NAME
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpStatusCode.Companion.BadRequest
