@@ -132,25 +132,25 @@ class InviteRepository(
     /**
      * Joins [user] to the invite's space; null when [token] is unknown or malformed, [AcceptResult.Used] or
      * [AcceptResult.Expired] when the invite cannot be accepted any more. One transaction with the invite row locked
-     * (`FOR UPDATE`), so two concurrent accepts cannot both use it. A caller who already is a member keeps their role
-     * and the invite stays unused.
+     * (`FOR UPDATE`), so two concurrent accepts cannot both use it. A caller who already is a member gets the space
+     * whatever the invite's state (someone reopening their own used link), keeps their role and leaves the invite as
+     * it was.
      */
     fun accept(token: String, user: UserId, spaces: SpaceRepository): AcceptResult? = transaction(db) {
         if (!TOKEN_FORMAT.matches(token)) return@transaction null
         val row = Invites.selectAll().where { Invites.tokenHash eq hash(token) }.forUpdate().singleOrNull()
             ?: return@transaction null
-        when (row.state()) {
+        val spaceId = row[Invites.spaceId]
+        if (spaces.membership(spaceId, user) != null) return@transaction AcceptResult.Joined(spaceId)
+        val at = now()
+        when (row.state(at)) {
             InviteState.USED -> AcceptResult.Used
             InviteState.EXPIRED -> AcceptResult.Expired
             InviteState.VALID -> {
-                val spaceId = row[Invites.spaceId]
-                if (spaces.membership(spaceId, user) == null) {
-                    val at = now()
-                    spaces.addMember(spaceId, user, roleOf(row[Invites.role]), at)
-                    Invites.update({ (Invites.id eq row[Invites.id]) and Invites.usedAt.isNull() }) {
-                        it[usedBy] = user.value
-                        it[usedAt] = at
-                    }
+                spaces.addMember(spaceId, user, roleOf(row[Invites.role]), at)
+                Invites.update({ (Invites.id eq row[Invites.id]) and Invites.usedAt.isNull() }) {
+                    it[usedBy] = user.value
+                    it[usedAt] = at
                 }
                 AcceptResult.Joined(spaceId)
             }
@@ -158,9 +158,9 @@ class InviteRepository(
     }
 
     // used_at, not used_by: used_by is cleared when the user who used it deletes their account.
-    private fun ResultRow.state() = when {
+    private fun ResultRow.state(at: Long = now()) = when {
         this[Invites.usedAt] != null -> InviteState.USED
-        this[Invites.expiresAt] <= now() -> InviteState.EXPIRED
+        this[Invites.expiresAt] <= at -> InviteState.EXPIRED
         else -> InviteState.VALID
     }
 

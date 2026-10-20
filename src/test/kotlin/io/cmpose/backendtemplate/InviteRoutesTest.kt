@@ -172,6 +172,30 @@ class InviteRoutesTest {
     }
 
     @Test
+    fun memberReopeningAUsedOrExpiredInviteGetsTheSpace() = withApp { client ->
+        val space = client.sharedSpace(alice, "Trip", carol to Role.VIEWER)
+        val used = client.invite(alice, space.id, Role.EDITOR)
+        assertEquals(HttpStatusCode.OK, client.accept(bob, used.token).status)
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
+        val expired = InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
+            .create(UUID.fromString(space.id), aliceId, Role.EDITOR)
+        val before = inviteRows()
+
+        val reopened = client.accept(bob, used.token)
+        assertEquals(HttpStatusCode.OK, reopened.status)
+        assertEquals(SpaceResponse(space.id, "Trip", Role.EDITOR, personal = false, memberCount = 3), reopened.body())
+        val viaExpired = client.accept(carol, expired.token)
+        assertEquals(HttpStatusCode.OK, viaExpired.status)
+        assertEquals(SpaceResponse(space.id, "Trip", Role.VIEWER, personal = false, memberCount = 3), viaExpired.body())
+        assertEquals(before, inviteRows())
+    }
+
+    private fun inviteRows() = transaction(TestDb.database) {
+        Invites.selectAll().map { row -> Invites.columns.map { row[it] } }.sortedBy { it.first().toString() }
+    }
+
+    @Test
     fun tokenIsNeverStoredInClear() = withApp { client ->
         val space = client.createSpace(alice, "Trip")
         val link = client.invite(alice, space.id, Role.VIEWER)
