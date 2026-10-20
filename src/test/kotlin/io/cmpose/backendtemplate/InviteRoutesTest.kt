@@ -4,6 +4,7 @@ import io.cmpose.backendtemplate.auth.VerifiedIdentity
 import io.cmpose.backendtemplate.sharing.AcceptResult
 import io.cmpose.backendtemplate.sharing.InvitePreview
 import io.cmpose.backendtemplate.sharing.InviteRepository
+import io.cmpose.backendtemplate.sharing.InviteResponse
 import io.cmpose.backendtemplate.sharing.InviteState
 import io.cmpose.backendtemplate.sharing.Invites
 import io.cmpose.backendtemplate.sharing.Role
@@ -18,6 +19,9 @@ import io.ktor.client.request.put
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.security.MessageDigest
@@ -25,6 +29,7 @@ import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import kotlin.io.path.createTempDirectory
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -265,5 +270,141 @@ class InviteRoutesTest {
         assertEquals(1, results.count { it is AcceptResult.Joined }, "$results")
         assertEquals(joiners.size - 1, results.count { it == AcceptResult.Used }, "$results")
         assertEquals(2, spaces.get(UUID.fromString(space.id), owner)?.memberCount)
+    }
+
+    private fun inviteCount() = transaction(TestDb.database) { Invites.selectAll().count() }
+
+    private suspend fun HttpClient.state(inviteToken: String) = preview(bob, inviteToken).body<InvitePreview>().state
+
+    @Test
+    fun pendingInviteQuota() = withApp(testConfig().copy(maxPendingInvitesPerSpace = 2)) { client ->
+        val space = client.createSpace(alice, "Trip")
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
+        // An expired invite is not pending: it does not count.
+        InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
+            .create(UUID.fromString(space.id), aliceId, Role.EDITOR)
+        val first = client.invite(alice, space.id, Role.EDITOR)
+        client.invite(alice, space.id, Role.VIEWER)
+        client.inviteResponse(alice, space.id, Role.VIEWER).assertQuotaExceeded("invites")
+        // Nor does a used one: once Bob accepts the first, there is room for one more.
+        assertEquals(HttpStatusCode.OK, client.accept(bob, first.token).status)
+        client.invite(alice, space.id, Role.VIEWER)
+        client.inviteResponse(alice, space.id, Role.VIEWER).assertQuotaExceeded("invites")
+        // The quota is per space.
+        client.invite(alice, client.createSpace(alice, "Other").id, Role.VIEWER)
+        assertEquals(5L, inviteCount())
+    }
+
+    @Test
+    fun concurrentInviteCreatesCannotBothPass() = assertNoDeadlock {
+        withApp(testConfig().copy(maxPendingInvitesPerSpace = 1)) { client ->
+            val space = client.createSpace(alice, "Trip")
+            // One create stops at its insert with the space row locked, the other at that row; without the lock
+            // both would count no invite and stop at the insert.
+            val responses = InsertGate("invites").use { gate ->
+                coroutineScope {
+                    val creates = List(2) { async { client.inviteResponse(alice, space.id, Role.VIEWER) } }
+                    gate.awaitWaiting(2)
+                    gate.close()
+                    creates.awaitAll()
+                }
+            }
+            assertEquals(
+                listOf(HttpStatusCode.Created, HttpStatusCode.Conflict),
+                responses.map { it.status }.sortedBy { it.value },
+            )
+            responses.single { it.status == HttpStatusCode.Conflict }.assertQuotaExceeded("invites")
+            assertEquals(1L, inviteCount())
+        }
+    }
+
+    @Test
+    fun loweredInviteQuotaKeepsInvites() {
+        lateinit var spaceId: String
+        val links = mutableListOf<InviteResponse>()
+        withApp { client ->
+            spaceId = client.createSpace(alice, "Trip").id
+            repeat(3) { links += client.invite(alice, spaceId, Role.VIEWER) }
+        }
+        withApp(testConfig().copy(maxPendingInvitesPerSpace = 2)) { client ->
+            links.forEach { assertEquals(InviteState.VALID, client.state(it.token)) }
+            client.inviteResponse(alice, spaceId, Role.VIEWER).assertQuotaExceeded("invites")
+        }
+        assertEquals(3L, inviteCount())
+    }
+
+    @Test
+    fun memberQuotaOnAccept() = withApp(testConfig().copy(maxMembersPerSpace = 2)) { client ->
+        val space = client.createSpace(alice, "Trip")
+        val first = client.invite(alice, space.id, Role.EDITOR)
+        val second = client.invite(alice, space.id, Role.VIEWER)
+        // The owner counts: Bob makes two.
+        assertEquals(HttpStatusCode.OK, client.accept(bob, first.token).status)
+        client.accept(carol, second.token).assertQuotaExceeded("members")
+        assertTrue(client.spaces(carol).none { it.id == space.id })
+        assertEquals(InviteState.VALID, client.state(second.token))
+        // A member already in the full space is let in as before; that adds no one.
+        val again = client.accept(bob, second.token)
+        assertEquals(HttpStatusCode.OK, again.status)
+        assertEquals(SpaceResponse(space.id, "Trip", Role.EDITOR, personal = false, memberCount = 2), again.body())
+        assertEquals(HttpStatusCode.OK, client.accept(alice, second.token).status)
+        assertEquals(InviteState.VALID, client.state(second.token))
+    }
+
+    @Test
+    fun concurrentAcceptsCannotOverfill() = assertNoDeadlock {
+        withApp(testConfig().copy(maxMembersPerSpace = 2)) { client ->
+            val space = client.createSpace(alice, "Trip")
+            val links = List(2) { client.invite(alice, space.id, Role.EDITOR) }
+            client.userId(bob)
+            client.userId(carol)
+            // One accept stops at its member insert with the space row locked, the other at that row; without
+            // the lock both would count one member and stop at the insert.
+            val responses = InsertGate("space_members").use { gate ->
+                coroutineScope {
+                    val accepts = listOf(bob, carol).zip(links).map { (token, link) ->
+                        async { client.accept(token, link.token) }
+                    }
+                    gate.awaitWaiting(2)
+                    gate.close()
+                    accepts.awaitAll()
+                }
+            }
+            assertEquals(
+                listOf(HttpStatusCode.OK, HttpStatusCode.Conflict),
+                responses.map { it.status }.sortedBy { it.value },
+            )
+            responses.single { it.status == HttpStatusCode.Conflict }.assertQuotaExceeded("members")
+            assertEquals(2, client.spaces(alice).single { it.id == space.id }.memberCount)
+        }
+    }
+
+    @Test
+    fun editorUploadAndOwnerInviteDoNotDeadlock() {
+        val config = testConfig().copy(
+            filesDir = createTempDirectory("invite-test").toString(),
+            maxStorageBytesPerUser = 1000,
+            maxPendingInvitesPerSpace = 5,
+        )
+        assertNoDeadlock {
+            withApp(config) { client ->
+                val space = client.sharedSpace(alice, "Trip", bob to Role.EDITOR)
+                // Each request stops at its insert holding its quota lock: the invite the space row, Bob's upload
+                // Alice's user row (she owns the space, so she pays). Each insert's foreign key then key-shares the
+                // row the other holds, which only a lock that leaves key-share free lets through.
+                val responses = InsertGate("invites", "files").use { gate ->
+                    coroutineScope {
+                        val invite = async { client.inviteResponse(alice, space.id, Role.VIEWER) }
+                        gate.awaitWaiting(1)
+                        val upload = async { client.upload(bob, spaceId = space.id) }
+                        gate.awaitWaiting(2)
+                        gate.close()
+                        listOf(invite, upload).awaitAll()
+                    }
+                }
+                assertEquals(listOf(HttpStatusCode.Created, HttpStatusCode.Created), responses.map { it.status })
+            }
+        }
     }
 }

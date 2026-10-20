@@ -349,7 +349,7 @@ class FileRoutesTest {
     @Test
     fun crossEditorUploadsDoNotDeadlock() {
         // A deadlock would not show in the answers: the losing transaction is retried (and logged), then passes.
-        val logs = capturedLogs {
+        assertNoDeadlock {
             testApplication {
                 val store = PairedStore(LocalDiskFileStore(dir))
                 val config = testConfig().copy(filesDir = dir.toString(), maxStorageBytesPerUser = 1000)
@@ -369,7 +369,6 @@ class FileRoutesTest {
             }
         }
         assertEquals(2L, rowCount())
-        assertTrue(logs.none { it.fullText().contains("deadlock detected") })
     }
 
     // /cmpose:sharing

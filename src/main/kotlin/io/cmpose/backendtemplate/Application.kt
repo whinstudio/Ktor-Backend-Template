@@ -62,8 +62,8 @@ fun Application.module(deps: AppDeps) {
     installSecurity(config)
     installClientVersion(config)
     // cmpose:sharing
-    val spaces = deps.db?.let(::SpaceRepository)
-    val invites = deps.db?.let { InviteRepository(it, config.inviteTtlDays) }
+    val spaces = deps.db?.let { SpaceRepository(it, config.maxSpacesPerUser, config.maxMembersPerSpace) }
+    val invites = deps.db?.let { InviteRepository(it, config.inviteTtlDays, config.maxPendingInvitesPerSpace) }
     // /cmpose:sharing
     // cmpose:sharing-off: val users = deps.db?.let(::UserRepository)
     val users = deps.db?.let { db -> UserRepository(db, onCreated = { SpaceRepository(db).personalSpace(it) }) }

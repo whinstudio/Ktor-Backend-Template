@@ -1,6 +1,8 @@
 package io.cmpose.backendtemplate.sharing
 
 import io.cmpose.backendtemplate.files.StoredFiles
+import io.cmpose.backendtemplate.plugins.Quota
+import io.cmpose.backendtemplate.plugins.quotaExceeded
 import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserIdentities
 import io.cmpose.backendtemplate.users.Users
@@ -18,6 +20,7 @@ import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.vendors.ForUpdateOption
 import java.util.UUID
 
 /** Longest space name after trimming. */
@@ -69,8 +72,28 @@ data class MemberResponse(
 /** What a role change or a removal did. */
 enum class MemberChange { DONE, NOT_MEMBER, LAST_OWNER }
 
-/** Spaces and their members. Callers check roles first (`requireRole`); nothing here checks who is asking. */
-class SpaceRepository(private val db: Database) {
+/**
+ * Locks the space's row until the transaction ends; needs a transaction. Whatever counts against a space (its members,
+ * its pending invites) is counted after this, so two writes cannot both pass on the same count, and space deletion
+ * (which locks the row `FOR UPDATE`) waits. The lock is `FOR NO KEY UPDATE`: it leaves free the key-share lock that a
+ * foreign key takes on the row, so an insert pointing at the space (an upload, a member) is not blocked by it.
+ */
+internal fun lockSpace(spaceId: UUID) {
+    Spaces.select(Spaces.id).where { Spaces.id eq spaceId }
+        .forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
+        .toList()
+}
+
+/**
+ * Spaces and their members. Callers check roles first (`requireRole`); nothing here checks who is asking. A user owns
+ * at most [maxSpacesPerUser] spaces besides their personal one, and a space has at most [maxMembersPerSpace] members,
+ * its owners included; `0` turns a limit off.
+ */
+class SpaceRepository(
+    private val db: Database,
+    private val maxSpacesPerUser: Int = 0,
+    private val maxMembersPerSpace: Int = 0,
+) {
     fun membership(spaceId: UUID, user: UserId): Membership? = transaction(db) {
         SpaceMembers.selectAll()
             .where { (SpaceMembers.spaceId eq spaceId) and (SpaceMembers.userId eq user.value) }
@@ -132,8 +155,9 @@ class SpaceRepository(private val db: Database) {
         Spaces.select(Spaces.isPersonal).where { Spaces.id eq spaceId }.singleOrNull()?.get(Spaces.isPersonal) ?: false
     }
 
-    /** A new shared space; [user] becomes its OWNER. */
+    /** A new shared space; [user] becomes its OWNER. Throws a 409 `QUOTA_EXCEEDED` (`spaces`) at the limit. */
     fun create(user: UserId, name: String): SpaceResponse = transaction(db) {
+        if (maxSpacesPerUser > 0) checkSpaces(user)
         val now = System.currentTimeMillis()
         val spaceId = UUID.randomUUID()
         Spaces.insert {
@@ -145,6 +169,21 @@ class SpaceRepository(private val db: Database) {
         }
         addMember(spaceId, user, Role.OWNER, now)
         SpaceResponse(spaceId.toString(), name, Role.OWNER, personal = false, memberCount = 1)
+    }
+
+    /**
+     * Refuses a new space when [user] already owns [maxSpacesPerUser] shared ones. Their user row is locked first, so
+     * two creates cannot both pass on the same count, and account deletion (which locks it `FOR UPDATE`) waits. The
+     * lock is `FOR NO KEY UPDATE`, as for the storage quota: the foreign keys' key-share locks on the row stay free.
+     */
+    private fun checkSpaces(user: UserId) {
+        Users.select(Users.id).where { Users.id eq user.value }
+            .forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
+            .toList()
+        val owned = Spaces.selectAll()
+            .where { (Spaces.ownerId eq user.value) and (Spaces.isPersonal eq false) }
+            .count()
+        if (owned >= maxSpacesPerUser) quotaExceeded(Quota.SPACES)
     }
 
     fun rename(spaceId: UUID, name: String) {
@@ -193,6 +232,16 @@ class SpaceRepository(private val db: Database) {
     /** Removes [user] from the space; refused when they are its last OWNER. */
     fun removeMember(spaceId: UUID, user: UserId): MemberChange = transaction(db) {
         changeMember(spaceId, user, keepsOwner = false) { SpaceMembers.deleteWhere { member(spaceId, user) } }
+    }
+
+    /**
+     * Throws a 409 `QUOTA_EXCEEDED` (`members`) when the space already has [maxMembersPerSpace] members. Needs a
+     * transaction with the space locked ([lockSpace]), so two joins cannot both pass on the same count.
+     */
+    internal fun requireMemberRoom(spaceId: UUID) {
+        if (maxMembersPerSpace <= 0) return
+        val members = SpaceMembers.selectAll().where { SpaceMembers.spaceId eq spaceId }.count()
+        if (members >= maxMembersPerSpace) quotaExceeded(Quota.MEMBERS)
     }
 
     /** Adds [user] with [role]; a no-op when they are a member already (their role stays). Needs a transaction. */
