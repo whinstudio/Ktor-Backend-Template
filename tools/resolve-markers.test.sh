@@ -257,22 +257,35 @@ if resolve "$dir" sharing off && resolve "$dir" sample on; then
 else
     fail "cross-option: sharing off, sample on"
 fi
-# The swap-before-a-marker rule holds for the same option only.
-dir="$(fixture cross-swap)"
-printf '%s\n' "a" "// cmpose:sample-off: b()" "// cmpose:sharing" "c" "// /cmpose:sharing" >"$dir/A.kt"
-if resolve "$dir" sample off; then
-    expect "cross-option: swap before another option's marker" "$dir/A.kt" \
-        "$(printf '%s\n' "a" "b()" "c" "// /cmpose:sharing")"
-else
-    fail "cross-option: swap before another option's marker"
-fi
-dir="$(fixture own-swap)"
-printf '%s\n' "a" "// cmpose:sample-off: b()" "// cmpose:sample" "c" "// /cmpose:sample" >"$dir/A.kt"
-if resolve "$dir" sample off 2 && [[ "$err" == *"before a marker"* ]]; then
-    pass "own swap before own marker -> exit 2"
-else
-    fail "own swap before own marker -> exit 2"
-fi
+# A swap may not stand before a marker line of any option, in any comment style: the swap would replace it unseen.
+# check_swap_before <name> <file> <option> <mode> <line…>: the resolver exits 2 and leaves the file as it was.
+check_swap_before() {
+    local name="$1" file="$2" option="$3" mode="$4" before
+    shift 4
+    dir="$(fixture swap-before)"
+    printf '%s\n' "$@" >"$dir/$file"
+    before="$(cat "$dir/$file")"
+    if resolve "$dir" "$option" "$mode" 2 && [[ "$err" == *"before a marker"* ]] \
+        && [ "$(cat "$dir/$file")" == "$before" ]; then
+        pass "$name -> exit 2"
+    else
+        fail "$name -> exit 2"
+    fi
+}
+for mode in on off; do
+    check_swap_before "sharing swap before a sample swap $mode" A.kt sharing "$mode" \
+        "a" "// cmpose:sharing-off: plain()" "// cmpose:sample-off: b()" "c()" "d"
+    check_swap_before "sharing swap before a sample block $mode" A.kt sharing "$mode" \
+        "a" "// cmpose:sharing-off: plain()" "// cmpose:sample" "c" "// /cmpose:sample"
+    check_swap_before "sharing swap before a sample close $mode" V9__x.sql sharing "$mode" \
+        "-- cmpose:sample" "-- cmpose:sharing-off: plain" "-- /cmpose:sample" "d"
+    check_swap_before "sharing swap before a marker in another comment style $mode" A.kt sharing "$mode" \
+        "a" "// cmpose:sharing-off: plain()" "# cmpose:sample" "c"
+    check_swap_before "sample swap before a sharing block $mode" A.kt sample "$mode" \
+        "a" "// cmpose:sample-off: b()" "// cmpose:sharing" "c" "// /cmpose:sharing"
+    check_swap_before "own swap before own marker $mode" A.kt sample "$mode" \
+        "a" "// cmpose:sample-off: b()" "// cmpose:sample" "c" "// /cmpose:sample"
+done
 
 # test_paths_file_per_option: sample off deletes the paths of tools/sample-paths.txt and leaves sharing-paths.txt's.
 copy_tools="$work/copy/tools"
@@ -299,6 +312,18 @@ for mode in on off; do
         fail "sample paths $mode"
     fi
 done
+
+# A file is picked by its own option's markers only: option "sam" leaves a file with only cmpose:sample markers (and
+# its unused import) alone.
+printf '%s\n' "# Paths deleted when the sam feature is off" >"$copy_tools/sam-paths.txt"
+prefix_only="$(printf '%s\n' "import a.b.Unused" "" "// cmpose:sample" "x()" "// /cmpose:sample")"
+dir="$(fixture option-prefix)"
+printf '%s\n' "$prefix_only" >"$dir/A.kt"
+if run_resolver "$copy_tools/resolve-markers.sh" "$dir" sam off; then
+    expect "option name is not a prefix match" "$dir/A.kt" "$prefix_only"
+else
+    fail "option name is not a prefix match"
+fi
 
 # test_unknown_option_paths_file_is_usage_error: no tools/<option>-paths.txt is bad usage, and nothing changes.
 for mode in on off; do

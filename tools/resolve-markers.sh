@@ -11,7 +11,8 @@
 #   .md                                                               <!-- cmpose:sharing --> … <!-- /cmpose:sharing -->
 # and the swap line "<comment> cmpose:sharing-off: <replacement>" (not in .md). Blocks of one option never nest.
 # A run sees only its own option's markers: another option's marker lines are plain text, so a block or swap of one
-# option may sit inside another option's block. The options run in a fixed order: sharing first, then sample.
+# option may sit inside another option's block. One exception: the line after a swap may not be a marker of any option
+# (in any comment style), as the swap would replace it unseen. The options run in a fixed order: sharing first, then sample.
 # Usage: bash tools/resolve-markers.sh <dir> <option> on|off
 #   <option> matches ^[a-z]+$ and has a tools/<option>-paths.txt (sharing, sample).
 # Exit 1 on bad usage (also a missing paths file), 2 on a marker error (nested, unclosed or stray block, swap on the
@@ -84,6 +85,17 @@ resolve_file() {
             tag = "cmpose:" option
             return index(rest, tag) == 1 && substr(rest, length(tag) + 1, 1) !~ /[a-z]/
         }
+        # A line that looks like a marker of any option, in any comment style (only what a swap must not stand before).
+        function any_marker(t,    styles, count, k, rest) {
+            count = split("// -- # <!--", styles, " ")
+            for (k = 1; k <= count; k++) {
+                if (index(t, styles[k]) != 1) continue
+                rest = substr(t, length(styles[k]) + 1)
+                sub(/^[ \t]*\/?/, "", rest)
+                if (index(rest, "cmpose:") == 1) return 1
+            }
+            return 0
+        }
         # Whether the code names <name> as a whole word.
         function names(code, name,    at, start, before, after) {
             start = 1
@@ -115,7 +127,7 @@ resolve_file() {
                     if (i == NR) die("cmpose:" option "-off marker on the last line", i)
                     next_line = lines[i + 1]
                     nt = trim(next_line)
-                    if (nt == opener || nt == closer || malformed(nt)) die("cmpose:" option "-off marker before a marker", i)
+                    if (nt == opener || nt == closer || malformed(nt) || any_marker(nt)) die("cmpose:" option "-off marker before a marker", i)
                     if (mode == "off") {
                         match(next_line, /^[ \t]*/)
                         next_line = substr(next_line, 1, RLENGTH) substr(t, length(swap) + 1)
@@ -156,7 +168,7 @@ trap cleanup EXIT
 while IFS= read -r -d '' file; do
     prefix="$(prefix_of "$(basename "$file")")"
     [ -n "$prefix" ] || continue
-    grep -q "cmpose:$option" "$file" || continue
+    grep -qE "cmpose:${option}([^a-z]|$)" "$file" || continue
     result="$(mktemp "${TMPDIR:-/tmp}/resolve-markers.XXXXXX")"
     results+=("$result")
     resolve_file "$prefix" "$file" >"$result" || exit 2
