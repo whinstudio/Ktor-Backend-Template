@@ -67,7 +67,7 @@ fun Application.module(deps: AppDeps) {
     // /cmpose:sharing
     // cmpose:sharing-off: val users = deps.db?.let(::UserRepository)
     val users = deps.db?.let { db -> UserRepository(db, onCreated = { SpaceRepository(db).personalSpace(it) }) }
-    val files = deps.db?.let(::FileRepository)
+    val files = deps.db?.let { FileRepository(it, config.maxStorageBytesPerUser) }
     // cmpose:sample
     val items = deps.db?.let(::ItemRepository)
     // /cmpose:sample
