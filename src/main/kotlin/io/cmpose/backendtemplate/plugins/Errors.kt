@@ -23,12 +23,16 @@ import java.sql.SQLException
 @Serializable
 data class FieldError(val field: String, val message: String)
 
-/** A failure the client may see: [status], a constant [code] and a message safe to show. */
+/**
+ * A failure the client may see: [status], a constant [code] and a message safe to show; [quota] only on a
+ * `QUOTA_EXCEEDED` (see [quotaExceeded]).
+ */
 class ApiException(
     val status: HttpStatusCode,
     val code: String,
     message: String,
     val fields: List<FieldError> = emptyList(),
+    val quota: String? = null,
 ) : RuntimeException(message)
 
 /** A 404 `NOT_FOUND`; also the answer for a row the caller may not see, so its existence is not revealed. */
@@ -38,7 +42,7 @@ fun notFound(): Nothing = throw ApiException(HttpStatusCode.NotFound, "NOT_FOUND
 fun badRequest(message: String, fields: List<FieldError> = emptyList()): Nothing =
     throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", message, fields)
 
-/** [minVersion] is set only on a 426 `CLIENT_UPGRADE_REQUIRED`. */
+/** [minVersion] is set only on a 426 `CLIENT_UPGRADE_REQUIRED`, [quota] only on a 409 `QUOTA_EXCEEDED`. */
 @Serializable
 data class ErrorDetail(
     val code: String,
@@ -46,6 +50,7 @@ data class ErrorDetail(
     val requestId: String,
     val fields: List<FieldError>? = null,
     val minVersion: String? = null,
+    val quota: String? = null,
 )
 
 /** The one error body: `{"error":{"code":…,"message":…,"requestId":…}}`, plus `fields` for validation errors. */
@@ -75,8 +80,9 @@ suspend fun ApplicationCall.respondError(
     message: String,
     fields: List<FieldError> = emptyList(),
     minVersion: String? = null,
+    quota: String? = null,
 ) {
-    respond(status, ErrorBody(ErrorDetail(code, message, requestId, fields.ifEmpty { null }, minVersion)))
+    respond(status, ErrorBody(ErrorDetail(code, message, requestId, fields.ifEmpty { null }, minVersion, quota)))
 }
 
 private suspend fun ApplicationCall.respondPayloadTooLarge() =
@@ -104,7 +110,11 @@ private suspend fun ApplicationCall.respondMalformedBody() =
  */
 fun Application.installErrors() {
     install(StatusPages) {
-        exception<ApiException> { call, e -> call.respondError(e.status, e.code, e.message.orEmpty(), e.fields) }
+        exception<ApiException> { call, e ->
+            // An audit line without personal data; the request log already has the request id and the user id.
+            if (e.code == "QUOTA_EXCEEDED") call.application.log.info("Quota exceeded ({})", e.quota)
+            call.respondError(e.status, e.code, e.message.orEmpty(), e.fields, quota = e.quota)
+        }
         exception<ClientUpgradeRequiredException> { call, e ->
             call.respondError(
                 HttpStatusCode.UpgradeRequired,

@@ -22,8 +22,13 @@ fun testConfig(appVersion: String = "test-1") = AppConfig(
     maxUploadBytes = 10_485_760L,
     maxConcurrentUploads = 4,
     minClientVersion = null,
+    // Quotas off (0); a quota test turns its own on with copy(...).
+    maxStorageBytesPerUser = 0L,
     // cmpose:sharing
     inviteTtlDays = 7,
+    maxSpacesPerUser = 0,
+    maxMembersPerSpace = 0,
+    maxPendingInvitesPerSpace = 0,
     // /cmpose:sharing
     publicBaseUrl = null,
     jwtClockSkewSeconds = 60L,

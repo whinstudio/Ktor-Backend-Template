@@ -125,8 +125,18 @@ means restoring that dump.
 <!-- /cmpose:sharing -->
 - Only an email the sign-in provider marks as verified is stored and shown; an unverified one is never kept.
 
+## Quotas
+
+- A write that would pass a quota is refused with `409 QUOTA_EXCEEDED`, whose body names the quota (`quota`); the
+  limit itself is not sent. `0` turns a quota off. Lowering one deletes nothing: only new writes are refused.
+- `MAX_STORAGE_BYTES_PER_USER` (default 104857600, 100 MB) caps the total size of a user's files (`quota`: `storage`).
+
 <!-- cmpose:sharing -->
 ## Sharing
 
 - `INVITE_TTL_DAYS` (default 7) is how long an invite token stays valid.
+- Quotas: a file counts against the owner of its space, also when an editor uploaded it. `MAX_SPACES_PER_USER`
+  (default 20) caps the spaces a user owns besides the personal one (`spaces`), `MAX_MEMBERS_PER_SPACE` (default 50)
+  the members of a space, owner included, checked when an invite is accepted (`members`), and
+  `MAX_PENDING_INVITES_PER_SPACE` (default 20) the valid invites of a space (`invites`).
 <!-- /cmpose:sharing -->

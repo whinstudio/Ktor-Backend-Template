@@ -71,6 +71,8 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
    memory also caps how many run at once (as uploads do with `MAX_CONCURRENT_UPLOADS`).
 1. A change that must happen once (a payment, a counter, a single-use token) is idempotent and safe under races: check
    and change in one transaction with `SELECT … FOR UPDATE`, or in one conditional `UPDATE`.
+1. A new write path that adds to something a quota counts checks the quota in the same locked transaction as the
+   write (lock the parent row with `SELECT … FOR UPDATE`, count, then insert) and fails with `quotaExceeded(...)`.
 1. Nothing changes state on a GET. The API authenticates with bearer tokens, not cookies, so CSRF does not apply; a
    feature that adds cookie sign-in adds CSRF protection with it.
 

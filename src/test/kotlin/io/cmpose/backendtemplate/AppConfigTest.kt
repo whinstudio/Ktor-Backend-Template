@@ -16,6 +16,14 @@ class AppConfigTest {
         "FIREBASE_PROJECT_ID" to "example-project",
         "FILES_DIR" to "/data/files",
     )
+    private val quotaVars = listOf(
+        "MAX_STORAGE_BYTES_PER_USER",
+        // cmpose:sharing
+        "MAX_SPACES_PER_USER",
+        "MAX_MEMBERS_PER_SPACE",
+        "MAX_PENDING_INVITES_PER_SPACE",
+        // /cmpose:sharing
+    )
 
     @Test
     fun missingRequiredListsAllNames() {
@@ -48,6 +56,38 @@ class AppConfigTest {
         assertEquals(4, config.maxConcurrentUploads)
         assertNull(config.minClientVersion)
         assertEquals("dev", config.appVersion)
+    }
+
+    @Test
+    fun quotaDefaults() {
+        val config = AppConfig.fromEnv(required)
+        assertEquals(104_857_600L, config.maxStorageBytesPerUser)
+        // cmpose:sharing
+        assertEquals(20, config.maxSpacesPerUser)
+        assertEquals(50, config.maxMembersPerSpace)
+        assertEquals(20, config.maxPendingInvitesPerSpace)
+        // /cmpose:sharing
+    }
+
+    @Test
+    fun zeroTurnsAQuotaOff() {
+        val config = AppConfig.fromEnv(required + quotaVars.associateWith { "0" })
+        assertEquals(0L, config.maxStorageBytesPerUser)
+        // cmpose:sharing
+        assertEquals(0, config.maxSpacesPerUser)
+        assertEquals(0, config.maxMembersPerSpace)
+        assertEquals(0, config.maxPendingInvitesPerSpace)
+        // /cmpose:sharing
+    }
+
+    @Test
+    fun negativeOrMalformedQuotaIsRejected() {
+        for (value in listOf("-1", "abc")) {
+            val error = assertFailsWith<ConfigException> {
+                AppConfig.fromEnv(required + quotaVars.associateWith { value })
+            }
+            assertEquals(quotaVars, error.invalid, "value $value")
+        }
     }
 
     @Test

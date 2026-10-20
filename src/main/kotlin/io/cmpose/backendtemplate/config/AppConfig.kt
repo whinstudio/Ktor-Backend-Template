@@ -8,8 +8,12 @@ private const val DEFAULT_RATE_LIMIT_SENSITIVE_PER_MINUTE = 10
 private const val DEFAULT_MAX_JSON_BYTES = 1_048_576L
 private const val DEFAULT_MAX_UPLOAD_BYTES = 10_485_760L
 private const val DEFAULT_MAX_CONCURRENT_UPLOADS = 4
+private const val DEFAULT_MAX_STORAGE_BYTES_PER_USER = 104_857_600L
 // cmpose:sharing
 private const val DEFAULT_INVITE_TTL_DAYS = 7
+private const val DEFAULT_MAX_SPACES_PER_USER = 20
+private const val DEFAULT_MAX_MEMBERS_PER_SPACE = 50
+private const val DEFAULT_MAX_PENDING_INVITES_PER_SPACE = 20
 // /cmpose:sharing
 private const val DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60L
 private const val DEFAULT_DB_POOL_SIZE = 5
@@ -31,8 +35,13 @@ data class AppConfig(
     val maxUploadBytes: Long,
     val maxConcurrentUploads: Int,
     val minClientVersion: String?,
+    // Quotas: 0 turns one off.
+    val maxStorageBytesPerUser: Long,
     // cmpose:sharing
     val inviteTtlDays: Int,
+    val maxSpacesPerUser: Int,
+    val maxMembersPerSpace: Int,
+    val maxPendingInvitesPerSpace: Int,
     // /cmpose:sharing
     val publicBaseUrl: String?,
     val jwtClockSkewSeconds: Long,
@@ -46,9 +55,10 @@ data class AppConfig(
             "trustedProxies=$trustedProxies, rateLimitPerMinute=$rateLimitPerMinute, " +
             "rateLimitSensitivePerMinute=$rateLimitSensitivePerMinute, maxJsonBytes=$maxJsonBytes, " +
             "maxUploadBytes=$maxUploadBytes, maxConcurrentUploads=$maxConcurrentUploads, " +
-            "minClientVersion=$minClientVersion, " +
+            "minClientVersion=$minClientVersion, maxStorageBytesPerUser=$maxStorageBytesPerUser, " +
             // cmpose:sharing
-            "inviteTtlDays=$inviteTtlDays, " +
+            "inviteTtlDays=$inviteTtlDays, maxSpacesPerUser=$maxSpacesPerUser, " +
+            "maxMembersPerSpace=$maxMembersPerSpace, maxPendingInvitesPerSpace=$maxPendingInvitesPerSpace, " +
             // /cmpose:sharing
             "publicBaseUrl=$publicBaseUrl, jwtClockSkewSeconds=$jwtClockSkewSeconds, dbPoolSize=$dbPoolSize, " +
             "appVersion=$appVersion)"
@@ -77,8 +87,14 @@ data class AppConfig(
                     maxUploadBytes = long("MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES),
                     maxConcurrentUploads = int("MAX_CONCURRENT_UPLOADS", DEFAULT_MAX_CONCURRENT_UPLOADS),
                     minClientVersion = optional("MIN_CLIENT_VERSION"),
+                    maxStorageBytesPerUser =
+                    long("MAX_STORAGE_BYTES_PER_USER", DEFAULT_MAX_STORAGE_BYTES_PER_USER, 0L..Long.MAX_VALUE),
                     // cmpose:sharing
                     inviteTtlDays = int("INVITE_TTL_DAYS", DEFAULT_INVITE_TTL_DAYS),
+                    maxSpacesPerUser = int("MAX_SPACES_PER_USER", DEFAULT_MAX_SPACES_PER_USER, 0..Int.MAX_VALUE),
+                    maxMembersPerSpace = int("MAX_MEMBERS_PER_SPACE", DEFAULT_MAX_MEMBERS_PER_SPACE, 0..Int.MAX_VALUE),
+                    maxPendingInvitesPerSpace =
+                    int("MAX_PENDING_INVITES_PER_SPACE", DEFAULT_MAX_PENDING_INVITES_PER_SPACE, 0..Int.MAX_VALUE),
                     // /cmpose:sharing
                     publicBaseUrl = optional("PUBLIC_BASE_URL"),
                     jwtClockSkewSeconds =

@@ -183,6 +183,8 @@ private fun JsonObjectBuilder.errorSchema() {
         put("requestId", string())
         put("fields", arrayOf(field))
         put("minVersion", string(description = "Only on 426 CLIENT_UPGRADE_REQUIRED"))
+        // cmpose:sharing-off: put("quota", string(description = "Only on 409 QUOTA_EXCEEDED: storage"))
+        put("quota", string(description = "Only on 409 QUOTA_EXCEEDED: storage, spaces, members or invites"))
     }
     put("Error", objectOf(listOf("error")) { put("error", detail) })
 }
