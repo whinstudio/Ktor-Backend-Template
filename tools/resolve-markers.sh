@@ -1,33 +1,43 @@
 #!/usr/bin/env bash
-# Resolves the cmpose:sharing markers of a project directory in place, the way the generator does.
+# Resolves the cmpose:<option> markers of a project directory in place, the way the generator does.
 #   on:  drops only the marker lines; a swap marker goes and the line after it stays.
 #   off: drops every marked block with its markers, puts each swap marker's text in place of the line after it (at
-#        that line's indentation), deletes the paths of tools/sharing-paths.txt and the Kotlin imports the remaining
+#        that line's indentation), deletes the paths of tools/<option>-paths.txt and the Kotlin imports the remaining
 #        code no longer names (star imports stay).
-# Either way a blank line on both sides of a dropped run becomes one. Marker forms by file name:
+# Either way a blank line on both sides of a dropped run becomes one. Marker forms by file name (here for sharing):
 #   .kt .kts                                                          // cmpose:sharing … // /cmpose:sharing
 #   .sql                                                              -- cmpose:sharing … -- /cmpose:sharing
 #   .yml .yaml .toml .properties .gitignore .env.example .dockerignore  # cmpose:sharing … # /cmpose:sharing
 #   .md                                                               <!-- cmpose:sharing --> … <!-- /cmpose:sharing -->
-# and the swap line "<comment> cmpose:sharing-off: <replacement>" (not in .md). Blocks never nest.
-# Usage: bash tools/resolve-markers.sh <dir> on|off
-# Exit 1 on bad usage, 2 on a marker error (nested, unclosed or stray block, swap on the last line, malformed marker);
-# on an error nothing is changed.
+# and the swap line "<comment> cmpose:sharing-off: <replacement>" (not in .md). Blocks of one option never nest.
+# A run sees only its own option's markers: another option's marker lines are plain text, so a block or swap of one
+# option may sit inside another option's block. One exception: the line after a swap may not be a marker of any option
+# (in any comment style), as the swap would replace it unseen. The options run in a fixed order: sharing first, then sample.
+# Usage: bash tools/resolve-markers.sh <dir> <option> on|off
+#   <option> matches ^[a-z]+$ and has a tools/<option>-paths.txt (sharing, sample).
+# Exit 1 on bad usage (also a missing paths file), 2 on a marker error (nested, unclosed or stray block, swap on the
+# last line or before a marker, malformed marker); on an error nothing is changed.
 set -euo pipefail
 
 usage() {
-    echo "usage: $0 <dir> on|off" >&2
+    echo "usage: $0 <dir> <option> on|off" >&2
     exit 1
 }
-[ "$#" -eq 2 ] || usage
+[ "$#" -eq 3 ] || usage
 dir="$1"
-mode="$2"
+option="$2"
+mode="$3"
+[[ "$option" =~ ^[a-z]+$ ]] || usage
 [ "$mode" == "on" ] || [ "$mode" == "off" ] || usage
 [ -d "$dir" ] || {
     echo "error: $dir is not a directory" >&2
     exit 1
 }
-paths_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sharing-paths.txt"
+paths_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$option-paths.txt"
+[ -f "$paths_file" ] || {
+    echo "error: $paths_file is missing" >&2
+    exit 1
+}
 
 # prefix_of <file name>: the line comment of the file's marker form (html for .md), empty when it has none.
 prefix_of() {
@@ -44,18 +54,18 @@ prefix_of() {
 resolve_file() {
     local prefix="$1" file="$2" open close swap kotlin=0
     if [ "$prefix" == "html" ]; then
-        open="<!-- cmpose:sharing -->"
-        close="<!-- /cmpose:sharing -->"
+        open="<!-- cmpose:$option -->"
+        close="<!-- /cmpose:$option -->"
         swap=""
         prefix="<!--"
     else
-        open="$prefix cmpose:sharing"
-        close="$prefix /cmpose:sharing"
-        swap="$prefix cmpose:sharing-off: "
+        open="$prefix cmpose:$option"
+        close="$prefix /cmpose:$option"
+        swap="$prefix cmpose:$option-off: "
     fi
     case "$file" in *.kt | *.kts) kotlin=1 ;; esac
-    awk -v opener="$open" -v closer="$close" -v swap="$swap" -v prefix="$prefix" -v mode="$mode" \
-        -v kotlin="$kotlin" -v file="$file" '
+    awk -v opener="$open" -v closer="$close" -v swap="$swap" -v prefix="$prefix" -v option="$option" \
+        -v mode="$mode" -v kotlin="$kotlin" -v file="$file" '
         function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
         function die(message, at) { printf "error: %s:%d: %s\n", file, at, message > "/dev/stderr"; failed = 1; exit 2 }
         # Out of a dropped run, blank lines that follow a blank line go.
@@ -67,12 +77,24 @@ resolve_file() {
             }
             out[++n] = s
         }
-        # A line that looks like a marker but is none of the known forms.
-        function malformed(t,    rest) {
+        # A line that looks like a marker of this option but is none of the known forms.
+        function malformed(t,    rest, tag) {
             if (index(t, prefix) != 1) return 0
             rest = substr(t, length(prefix) + 1)
             sub(/^[ \t]*\/?/, "", rest)
-            return index(rest, "cmpose:") == 1
+            tag = "cmpose:" option
+            return index(rest, tag) == 1 && substr(rest, length(tag) + 1, 1) !~ /[a-z]/
+        }
+        # A line that looks like a marker of any option, in any comment style (only what a swap must not stand before).
+        function any_marker(t,    styles, count, k, rest) {
+            count = split("// -- # <!--", styles, " ")
+            for (k = 1; k <= count; k++) {
+                if (index(t, styles[k]) != 1) continue
+                rest = substr(t, length(styles[k]) + 1)
+                sub(/^[ \t]*\/?/, "", rest)
+                if (index(rest, "cmpose:") == 1) return 1
+            }
+            return 0
         }
         # Whether the code names <name> as a whole word.
         function names(code, name,    at, start, before, after) {
@@ -93,7 +115,7 @@ resolve_file() {
                 line = lines[i]
                 t = trim(line)
                 if (t == opener) {
-                    if (inside) die("nested cmpose:sharing block (open since line " opened ")", i)
+                    if (inside) die("nested cmpose:" option " block (open since line " opened ")", i)
                     inside = 1; opened = i; dropped = 1; continue
                 }
                 if (t == closer) {
@@ -102,10 +124,10 @@ resolve_file() {
                 }
                 if (inside && mode == "off") continue
                 if (swap != "" && index(t, swap) == 1) {
-                    if (i == NR) die("cmpose:sharing-off marker on the last line", i)
+                    if (i == NR) die("cmpose:" option "-off marker on the last line", i)
                     next_line = lines[i + 1]
                     nt = trim(next_line)
-                    if (nt == opener || nt == closer || malformed(nt)) die("cmpose:sharing-off marker before a marker", i)
+                    if (nt == opener || nt == closer || malformed(nt) || any_marker(nt)) die("cmpose:" option "-off marker before a marker", i)
                     if (mode == "off") {
                         match(next_line, /^[ \t]*/)
                         next_line = substr(next_line, 1, RLENGTH) substr(t, length(swap) + 1)
@@ -117,7 +139,7 @@ resolve_file() {
                 if (malformed(t)) die("malformed cmpose marker: " t, i)
                 emit(line)
             }
-            if (inside) die("unclosed cmpose:sharing block", opened)
+            if (inside) die("unclosed cmpose:" option " block", opened)
 
             if (kotlin && mode == "off") {
                 import_re = "^import[ \t]+[A-Za-z0-9_.`]+([ \t]+as[ \t]+[A-Za-z0-9_`]+)?[ \t]*$"
@@ -146,7 +168,7 @@ trap cleanup EXIT
 while IFS= read -r -d '' file; do
     prefix="$(prefix_of "$(basename "$file")")"
     [ -n "$prefix" ] || continue
-    grep -q "cmpose:" "$file" || continue
+    grep -qE "cmpose:${option}([^a-z]|$)" "$file" || continue
     result="$(mktemp "${TMPDIR:-/tmp}/resolve-markers.XXXXXX")"
     results+=("$result")
     resolve_file "$prefix" "$file" >"$result" || exit 2
@@ -154,13 +176,9 @@ while IFS= read -r -d '' file; do
 done < <(find "$dir" \( -name .git -o -name build -o -name .gradle -o -name .kotlin -o -name .local-server \
     -o -name node_modules \) -prune -o -type f -print0)
 
-# The sharing-only paths: relative, inside the directory.
-sharing_paths=()
+# The option-only paths: relative, inside the directory.
+option_paths=()
 if [ "$mode" == "off" ]; then
-    [ -f "$paths_file" ] || {
-        echo "error: $paths_file is missing" >&2
-        exit 1
-    }
     while IFS= read -r path || [ -n "$path" ]; do
         path="${path%$'\r'}"
         case "$path" in "" | "#"*) continue ;; esac
@@ -170,7 +188,7 @@ if [ "$mode" == "off" ]; then
                 exit 1
                 ;;
         esac
-        sharing_paths+=("$path")
+        option_paths+=("$path")
     done <"$paths_file"
 fi
 
@@ -178,6 +196,6 @@ fi
 for index in "${!targets[@]}"; do
     cat "${results[$index]}" >"${targets[$index]}"
 done
-for path in ${sharing_paths[@]+"${sharing_paths[@]}"}; do
+for path in ${option_paths[@]+"${option_paths[@]}"}; do
     rm -rf "${dir:?}/$path"
 done

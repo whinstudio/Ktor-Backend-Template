@@ -3,6 +3,7 @@ package io.cmpose.backendtemplate
 import io.cmpose.backendtemplate.sharing.MemberResponse
 import io.cmpose.backendtemplate.sharing.Role
 import io.cmpose.backendtemplate.sharing.RoleChange
+import io.cmpose.backendtemplate.users.ProfileUpdate
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
@@ -10,6 +11,7 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
@@ -120,6 +122,16 @@ class MemberRoutesTest {
         assertEquals(Role.OWNER, owner.role)
         assertEquals("alice@example.com", owner.email)
         assertTrue(members.zipWithNext().drop(1).all { (a, b) -> a.joinedAt <= b.joinedAt })
+    }
+
+    @Test
+    fun membersCarryTheirDisplayName() = withApp { client ->
+        val space = client.sharedSpace(alice, "Trip", bob to Role.VIEWER)
+        val profile = client.put("/api/v1/me/profile") { jsonBody(bob, ProfileUpdate(displayName = "Bob")) }
+        assertEquals(HttpStatusCode.NoContent, profile.status)
+        val members = client.members(alice, space.id)
+        assertEquals("Bob", members.single { it.userId == client.userId(bob) }.displayName)
+        assertNull(members.single { it.userId == client.userId(alice) }.displayName)
     }
 
     @Test

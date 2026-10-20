@@ -1,0 +1,6 @@
+# Paths deleted when the sample feature is off
+src/main/kotlin/io/cmpose/backendtemplate/feature/sample
+src/main/resources/db/migration/V3__sample.sql
+src/test/kotlin/io/cmpose/backendtemplate/feature/sample
+src/test/kotlin/io/cmpose/backendtemplate/ItemRoutesTest.kt
+src/test/kotlin/io/cmpose/backendtemplate/ItemTestClient.kt

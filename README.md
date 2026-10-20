@@ -1,8 +1,11 @@
 # Cmpose Backend
 
 A production-ready Kotlin/Ktor backend for a mobile app: Firebase sign-in verified on the server, PostgreSQL with
-Flyway migrations, file uploads, account deletion, one sample feature to copy, and the parts to deploy it as one
-container behind a shared nginx and PostgreSQL.
+Flyway migrations, file uploads, account deletion, and the parts to deploy it as one container behind a shared nginx
+and PostgreSQL.
+<!-- cmpose:sample -->
+One sample feature shows the shape to copy.
+<!-- /cmpose:sample -->
 
 - Kotlin on JVM 21, Ktor, Exposed, Flyway, PostgreSQL, HikariCP, logback.
 - Sign-in: the app signs in with Firebase; the server checks each ID token's signature against Google's public keys,
@@ -16,9 +19,11 @@ container behind a shared nginx and PostgreSQL.
 |------|------|
 | `src/main/kotlin/.../config` | `AppConfig`: every setting, read from the environment |
 | `src/main/kotlin/.../plugins` | errors, security headers, CORS, body limits, rate limits, request ids, client version |
-| `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me` |
+| `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me`, the profile (`PUT /api/v1/me/profile`: display name) |
 | `src/main/kotlin/.../files` | uploads (type read from the bytes) and downloads |
+<!-- cmpose:sample -->
 | `src/main/kotlin/.../feature/sample` | the sample feature (`/api/v1/items`): the shape to copy |
+<!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
 | `src/main/kotlin/.../sharing` | spaces, roles and invitations |
 <!-- /cmpose:sharing -->
@@ -41,6 +46,12 @@ Needs JDK 21. The local server keeps everything in `.local-server/` (git-ignored
 `./gradlew resetLocal` deletes `.local-server/` (database, files and settings). `./gradlew build` compiles, runs detekt
 and the tests.
 
+- `localServerDir=<path>` in `gradle.properties` (or `-PlocalServerDir=<path>`) moves the folder; the path is relative
+  to this project. `runLocal` and `resetLocal` both use it, and the config file is then `<path>/config.properties`.
+  The folder holds the local database and config, so it must stay git-ignored; it may not be this project or a folder
+  that contains it.
+- `./gradlew writeOpenApi` writes the API description the server serves to `build/openapi/openapi.json`.
+
 ## API conventions
 
 - All routes are under `/api/v1` except `/health` (liveness) and `/ready` (the database answers). The API description
@@ -48,13 +59,16 @@ and the tests.
 - Every error has one shape, with `fields` only for validation errors:
 
   ```json
-  {"error":{"code":"BAD_REQUEST","message":"Invalid item","requestId":"…","fields":[{"field":"title","message":"…"}]}}
+  {"error":{"code":"BAD_REQUEST","message":"Invalid display name","requestId":"…","fields":[{"field":"displayName","message":"…"}]}}
   ```
 
   Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
   `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
-  `UPLOADS_BUSY`. A 500 carries no
-  detail beyond the request id.
+  `UPLOADS_BUSY`. A 500 carries no detail beyond the request id.
+<!-- cmpose:sharing -->
+  With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
+  (409, already used) and `INVITE_EXPIRED` (410).
+<!-- /cmpose:sharing -->
 - Headers:
   - Every response has `X-App-Version` (`APP_VERSION`) and `X-Request-Id`: the client's own id when it sends a safe
     one (letters, digits, `-`, `_`, `.`, at most 128 characters), else a generated one. Quote it when reporting a
@@ -79,10 +93,15 @@ invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWOR
 
 ## Add a feature
 
-Copy the sample feature: `feature/sample` (table, repository, routes, DTOs), its migration `V3__sample.sql` and its
-tests. Then go through [`SECURITY-CHECKLIST.md`](SECURITY-CHECKLIST.md): authorization on every route, the owner filter
-in every query, validation at the boundary, deletion with the account, rate limits, logs without personal data, and the
-IDOR and validation tests. Add the routes to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
+<!-- cmpose:sample -->
+Start a plain record type from the sample feature: `feature/sample` (table, repository, routes, DTOs), its migration
+`V3__sample.sql` and its tests. For any other feature:
+<!-- /cmpose:sample -->
+Copy the shape of `files/` (repository, routes, migration, tests) and go through
+[SECURITY-CHECKLIST.md](SECURITY-CHECKLIST.md).
+The checklist covers authorization on every route, the owner filter in every query, validation at the boundary,
+deletion with the account, rate limits, logs without personal data, and the IDOR and validation tests. Add the routes
+to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
 
 ## Deploy
 

@@ -2,6 +2,7 @@ package io.cmpose.backendtemplate.sharing
 
 import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.Users
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.JoinType
@@ -43,14 +44,42 @@ object Invites : Table("invites") {
 @Serializable
 data class InviteResponse(val token: String, val expiresAt: Long)
 
-/** What a usable invite offers. */
+/** Whether an invite can still be accepted: once used it stays [USED], even after it expires. */
 @Serializable
-data class InvitePreview(val spaceName: String, val role: Role, val expiresAt: Long)
+enum class InviteState {
+    @SerialName("valid")
+    VALID,
+
+    @SerialName("used")
+    USED,
+
+    @SerialName("expired")
+    EXPIRED,
+}
+
+/** What an invite offers, and from whom: [inviterName] is its creator's display name, null when they have none. */
+@Serializable
+data class InvitePreview(
+    val spaceName: String,
+    val inviterName: String?,
+    val role: Role,
+    val expiresAt: Long,
+    val state: InviteState,
+)
+
+/** How an accept ended: the caller is in the space, or the invite was already used or has expired. */
+sealed interface AcceptResult {
+    data class Joined(val spaceId: UUID) : AcceptResult
+
+    data object Used : AcceptResult
+
+    data object Expired : AcceptResult
+}
 
 /**
  * Single-use invite links that expire [ttlDays] after creation. The token (32 random bytes, URL-safe base64) is
- * handed out once; only its SHA-256 hex digest is stored, and every lookup goes through that digest. A used, expired
- * or unknown token is the same to callers: null.
+ * handed out once; only its SHA-256 hex digest is stored, and every lookup goes through that digest. An unknown or
+ * malformed token is null to callers; a known one reports its [InviteState].
  */
 class InviteRepository(
     private val db: Database,
@@ -81,41 +110,59 @@ class InviteRepository(
         return InviteResponse(token, expiresAt)
     }
 
-    /** What a usable invite offers; null when [token] is unknown, used or expired. */
+    /** What the invite offers and its state, used and expired ones too; null when [token] is unknown or malformed. */
     fun preview(token: String): InvitePreview? = transaction(db) {
         if (!TOKEN_FORMAT.matches(token)) return@transaction null
         Invites.join(Spaces, JoinType.INNER, Invites.spaceId, Spaces.id)
+            .join(Users, JoinType.INNER, Invites.createdBy, Users.id)
             .selectAll()
             .where { Invites.tokenHash eq hash(token) }
             .singleOrNull()
-            ?.takeIf { it.isUsable() }
-            ?.let { InvitePreview(it[Spaces.name], roleOf(it[Invites.role]), it[Invites.expiresAt]) }
+            ?.let {
+                InvitePreview(
+                    spaceName = it[Spaces.name],
+                    inviterName = it[Users.displayName],
+                    role = roleOf(it[Invites.role]),
+                    expiresAt = it[Invites.expiresAt],
+                    state = it.state(),
+                )
+            }
     }
 
     /**
-     * Joins [user] to the invite's space and returns its id; null when [token] is unknown, used or expired. One
-     * transaction with the invite row locked (`FOR UPDATE`), so two concurrent accepts cannot both use it. A caller who
-     * already is a member keeps their role and the invite stays unused.
+     * Joins [user] to the invite's space; null when [token] is unknown or malformed, [AcceptResult.Used] or
+     * [AcceptResult.Expired] when the invite cannot be accepted any more. One transaction with the invite row locked
+     * (`FOR UPDATE`), so two concurrent accepts cannot both use it. A caller who already is a member gets the space
+     * whatever the invite's state (someone reopening their own used link), keeps their role and leaves the invite as
+     * it was.
      */
-    fun accept(token: String, user: UserId, spaces: SpaceRepository): UUID? = transaction(db) {
+    fun accept(token: String, user: UserId, spaces: SpaceRepository): AcceptResult? = transaction(db) {
         if (!TOKEN_FORMAT.matches(token)) return@transaction null
         val row = Invites.selectAll().where { Invites.tokenHash eq hash(token) }.forUpdate().singleOrNull()
-            ?.takeIf { it.isUsable() }
             ?: return@transaction null
         val spaceId = row[Invites.spaceId]
-        if (spaces.membership(spaceId, user) == null) {
-            val at = now()
-            spaces.addMember(spaceId, user, roleOf(row[Invites.role]), at)
-            Invites.update({ (Invites.id eq row[Invites.id]) and Invites.usedAt.isNull() }) {
-                it[usedBy] = user.value
-                it[usedAt] = at
+        if (spaces.membership(spaceId, user) != null) return@transaction AcceptResult.Joined(spaceId)
+        val at = now()
+        when (row.state(at)) {
+            InviteState.USED -> AcceptResult.Used
+            InviteState.EXPIRED -> AcceptResult.Expired
+            InviteState.VALID -> {
+                spaces.addMember(spaceId, user, roleOf(row[Invites.role]), at)
+                Invites.update({ (Invites.id eq row[Invites.id]) and Invites.usedAt.isNull() }) {
+                    it[usedBy] = user.value
+                    it[usedAt] = at
+                }
+                AcceptResult.Joined(spaceId)
             }
         }
-        spaceId
     }
 
     // used_at, not used_by: used_by is cleared when the user who used it deletes their account.
-    private fun ResultRow.isUsable() = this[Invites.usedAt] == null && this[Invites.expiresAt] > now()
+    private fun ResultRow.state(at: Long = now()) = when {
+        this[Invites.usedAt] != null -> InviteState.USED
+        this[Invites.expiresAt] <= at -> InviteState.EXPIRED
+        else -> InviteState.VALID
+    }
 
     private fun hash(token: String): String =
         MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).joinToString("") { "%02x".format(it) }

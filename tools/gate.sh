@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# The template gate. For each sharing variant (on, off) the repository is copied to a temporary directory without its
-# git data and build output, the markers are resolved (tools/resolve-markers.sh) and the copy is checked: no cmpose:
-# marker left, in off no sharing word (space, invite, member) in the code, docs and deploy parts, ./gradlew build
-# (compile, detekt, tests), tools/deploy-lint.sh, and the Docker image (non-root user) unless --no-docker.
+# The template gate. For each variant the repository is copied to a temporary directory without its git data and build
+# output, the markers are resolved (tools/resolve-markers.sh, sharing first, then sample) and the copy is checked:
+#   full         sharing on,  sample on
+#   sharing-off  sharing off, sample on   (no sharing word: space, invite, member)
+#   cmp          sharing on,  sample off  (no sample word: feature/sample, /items, Item…, V3__sample; no Docker image)
+# Every variant: no cmpose: marker left, the word check of its off option in the code, docs and deploy parts,
+# ./gradlew build (compile, detekt, tests), tools/deploy-lint.sh, and the Docker image (non-root user) unless
+# --no-docker.
 # Usage: bash tools/gate.sh [--no-docker] [--offline]   (prints "== N passed, M failed", exit 1 on any failure)
 # The temporary directory is removed when every check passes; on a failure it is kept for the logs.
 set -uo pipefail
@@ -45,8 +49,8 @@ copy() {
         --exclude /.idea --exclude .claude --exclude .DS_Store "$root/" "$1/"
 }
 
-# Every path of tools/sharing-paths.txt exists, so the list is not stale.
-sharing_paths_exist() {
+# option_paths_exist <option>: every path of tools/<option>-paths.txt exists, so the list is not stale.
+option_paths_exist() {
     local path missing=0
     while IFS= read -r path || [ -n "$path" ]; do
         case "$path" in "" | "#"*) continue ;; esac
@@ -54,7 +58,7 @@ sharing_paths_exist() {
             echo "missing: $path"
             missing=1
         }
-    done <"$root/tools/sharing-paths.txt"
+    done <"$root/tools/$1-paths.txt"
     [ "$missing" -eq 0 ]
 }
 
@@ -63,12 +67,23 @@ no_markers_left() {
     ! grep -rn "cmpose:" "$1" --exclude-dir=tools --exclude-dir=build --exclude-dir=.gradle --exclude-dir=.kotlin
 }
 
+# word_targets <dir>: the code, docs and deploy parts the word checks search.
+word_targets() {
+    for target in src SECURITY-CHECKLIST.md deploy README.md; do
+        [ -e "$1/$target" ] && echo "$1/$target"
+    done
+}
+
 no_sharing_words() {
     local targets=()
-    for target in src SECURITY-CHECKLIST.md deploy README.md; do
-        [ -e "$1/$target" ] && targets+=("$1/$target")
-    done
+    while IFS= read -r target; do targets+=("$target"); done < <(word_targets "$1")
     ! grep -rniE "space|invite|member" "${targets[@]}"
+}
+
+no_sample_words() {
+    local targets=()
+    while IFS= read -r target; do targets+=("$target"); done < <(word_targets "$1")
+    ! grep -rnE 'feature[./]sample|/items|Item(Repository|Routes|Table|Dto|OpenApi)|V3__sample' "${targets[@]}"
 }
 
 gradle_build() {
@@ -102,19 +117,24 @@ docker_image() {
 }
 
 check "resolve-markers tests" bash "$root/tools/resolve-markers.test.sh"
-check "sharing paths exist" sharing_paths_exist
-for variant in on off; do
+check "sharing paths exist" option_paths_exist sharing
+check "sample paths exist" option_paths_exist sample
+# <name> <sharing> <sample> <docker image: 1 or 0>
+for spec in "full on on 1" "sharing-off off on 1" "cmp on off 0"; do
+    read -r variant sharing sample image <<<"$spec"
     dir="$work/$variant"
     check "$variant: copy" copy "$dir"
-    check "$variant: resolve markers" bash "$dir/tools/resolve-markers.sh" "$dir" "$variant"
+    check "$variant: resolve sharing markers" bash "$dir/tools/resolve-markers.sh" "$dir" sharing "$sharing"
+    check "$variant: resolve sample markers" bash "$dir/tools/resolve-markers.sh" "$dir" sample "$sample"
     check "$variant: no marker left" no_markers_left "$dir"
-    [ "$variant" == "off" ] && check "$variant: no sharing words" no_sharing_words "$dir"
+    [ "$sharing" == "off" ] && check "$variant: no sharing words" no_sharing_words "$dir"
+    [ "$sample" == "off" ] && check "$variant: no sample words" no_sample_words "$dir"
     check "$variant: gradle build" gradle_build "$dir"
     if compgen -G "$dir/build/test-results/test/TEST-*.xml" >/dev/null; then
         echo "     $variant: $(test_summary "$dir")"
     fi
     check "$variant: deploy-lint" deploy_lint "$dir"
-    [ "$docker" -eq 1 ] && check "$variant: docker image" docker_image "$dir" "$variant"
+    [ "$docker" -eq 1 ] && [ "$image" -eq 1 ] && check "$variant: docker image" docker_image "$dir" "$variant"
 done
 
 echo "== $passed passed, $failed failed"

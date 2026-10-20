@@ -1,8 +1,16 @@
-package io.cmpose.backendtemplate
+package io.cmpose.backendtemplate.feature.sample
 
-import io.cmpose.backendtemplate.feature.sample.ItemDraft
-import io.cmpose.backendtemplate.feature.sample.ItemResponse
-import io.cmpose.backendtemplate.feature.sample.Items
+import io.cmpose.backendtemplate.TestDb
+import io.cmpose.backendtemplate.TestKeys
+import io.cmpose.backendtemplate.authDeps
+import io.cmpose.backendtemplate.createItem
+import io.cmpose.backendtemplate.getItem
+import io.cmpose.backendtemplate.jsonClient
+import io.cmpose.backendtemplate.listItems
+import io.cmpose.backendtemplate.module
+import io.cmpose.backendtemplate.patchItem
+import io.cmpose.backendtemplate.postItem
+import io.cmpose.backendtemplate.postItemJson
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.statement.HttpResponse
@@ -20,7 +28,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class ValidationTest {
+class ItemValidationTest {
     @BeforeTest
     fun clean() = TestDb.reset()
 

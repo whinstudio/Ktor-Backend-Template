@@ -1,7 +1,9 @@
 # Security checklist for a new feature
 
-Short rules for adding a record type or a route. The sample feature (`feature/sample`, `V3__sample.sql` and its tests)
-follows every one of them: copy its shape.
+Short rules for adding a record type or a route.
+<!-- cmpose:sample -->
+The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows every one of them: copy its shape.
+<!-- /cmpose:sample -->
 
 ## Access
 
@@ -45,6 +47,8 @@ follows every one of them: copy its shape.
    to them goes. A column naming who added a row is `REFERENCES users(id) ON DELETE SET NULL` (as `files.uploaded_by`),
    never `CASCADE`, which would delete shared data, and never a copied name or email, which would outlive the account
    (`SharingDeletionTest`). The privacy notes in `deploy/README.md` say so; keep the app's privacy policy in step.
+1. An invite preview shows whoever holds the token the space name, the role and the inviter's display name, and keeps
+   showing them after the invite is used or expires; only an unknown token is a 404. Add nothing else to the preview.
 <!-- /cmpose:sharing -->
 1. Schema changes are new Flyway migrations (`V<n>__<name>.sql`); never edit one that has run anywhere.
 1. Responses are DTOs built for the client. Never serialize table rows or internal objects, and never return another
@@ -72,12 +76,14 @@ follows every one of them: copy its shape.
 
 ## Tests
 
-1. Every route gets an IDOR test: another user's GET, PATCH and DELETE answer 404 and change nothing (`IdorTest`).
+1. Every route gets an IDOR test: another user's GET, PATCH and DELETE answer 404 and change nothing.
 <!-- cmpose:sharing -->
 1. With sharing, also a VIEWER's write and a member of another space, both 404.
 <!-- /cmpose:sharing -->
-1. Every validation rule gets a negative test: empty, too long, wrong type, unknown and server-owned fields
-   (`ValidationTest`).
+1. Every validation rule gets a negative test: empty, too long, wrong type, unknown and server-owned fields.
+<!-- cmpose:sample -->
+1. The sample feature has both kinds: `feature/sample/ItemIdorTest` and `feature/sample/ItemValidationTest`.
+<!-- /cmpose:sample -->
 1. Keep the API description (`openapi/OpenApiSpec.kt`) in step with the routes; `OpenApiTest` checks the path list
    and that every `$ref` resolves. Run `./gradlew test detekt` before shipping.
 

@@ -1,15 +1,20 @@
 package io.cmpose.backendtemplate
 
 import io.cmpose.backendtemplate.auth.VerifiedIdentity
+import io.cmpose.backendtemplate.sharing.AcceptResult
 import io.cmpose.backendtemplate.sharing.InvitePreview
 import io.cmpose.backendtemplate.sharing.InviteRepository
+import io.cmpose.backendtemplate.sharing.InviteState
 import io.cmpose.backendtemplate.sharing.Invites
 import io.cmpose.backendtemplate.sharing.Role
 import io.cmpose.backendtemplate.sharing.SpaceRepository
 import io.cmpose.backendtemplate.sharing.SpaceResponse
+import io.cmpose.backendtemplate.users.ProfileUpdate
+import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserRepository
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.put
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
@@ -54,16 +59,18 @@ class InviteRoutesTest {
         val link = client.invite(alice, space.id, Role.EDITOR)
         val preview = client.preview(bob, link.token)
         assertEquals(HttpStatusCode.OK, preview.status)
-        assertEquals(InvitePreview("Trip", Role.EDITOR, link.expiresAt), preview.body<InvitePreview>())
+        assertEquals(
+            InvitePreview("Trip", inviterName = null, Role.EDITOR, link.expiresAt, InviteState.VALID),
+            preview.body<InvitePreview>(),
+        )
 
         val joined = client.accept(bob, link.token)
         assertEquals(HttpStatusCode.OK, joined.status)
         assertEquals(SpaceResponse(space.id, "Trip", Role.EDITOR, personal = false, memberCount = 2), joined.body())
 
         val again = client.accept(carol, link.token)
-        assertEquals(HttpStatusCode.NotFound, again.status)
-        assertEquals("NOT_FOUND", again.errorCode())
-        assertEquals(HttpStatusCode.NotFound, client.preview(carol, link.token).status)
+        assertEquals(HttpStatusCode.Conflict, again.status)
+        assertEquals("INVITE_USED", again.errorCode())
         assertTrue(client.spaces(carol).none { it.id == space.id })
     }
 
@@ -75,17 +82,54 @@ class InviteRoutesTest {
     }
 
     @Test
-    fun expiredInviteIs404() = withApp { client ->
+    fun expiredInvitePreviewSaysExpiredAndAcceptIs410() = withApp { client ->
         val space = client.createSpace(alice, "Trip")
-        val aliceId = io.cmpose.backendtemplate.users.UserId(UUID.fromString(client.userId(alice)))
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
         val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
         val old = InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
             .create(UUID.fromString(space.id), aliceId, Role.EDITOR)
-        assertEquals(HttpStatusCode.NotFound, client.preview(bob, old.token).status)
+        val preview = client.preview(bob, old.token)
+        assertEquals(HttpStatusCode.OK, preview.status)
+        assertEquals(InviteState.EXPIRED, preview.body<InvitePreview>().state)
         val accept = client.accept(bob, old.token)
-        assertEquals(HttpStatusCode.NotFound, accept.status)
-        assertEquals("NOT_FOUND", accept.errorCode())
+        assertEquals(HttpStatusCode.Gone, accept.status)
+        assertEquals("INVITE_EXPIRED", accept.errorCode())
         assertTrue(client.spaces(bob).none { it.id == space.id })
+    }
+
+    @Test
+    fun usedInvitePreviewSaysUsedAndAcceptIs409() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val link = client.invite(alice, space.id, Role.EDITOR)
+        assertEquals(HttpStatusCode.OK, client.accept(bob, link.token).status)
+        val preview = client.preview(carol, link.token)
+        assertEquals(HttpStatusCode.OK, preview.status)
+        assertEquals(
+            InvitePreview("Trip", inviterName = null, Role.EDITOR, link.expiresAt, InviteState.USED),
+            preview.body<InvitePreview>(),
+        )
+        val accept = client.accept(carol, link.token)
+        assertEquals(HttpStatusCode.Conflict, accept.status)
+        assertEquals("INVITE_USED", accept.errorCode())
+        assertTrue(client.spaces(carol).none { it.id == space.id })
+    }
+
+    @Test
+    fun previewNamesTheInviter() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val profile = client.put("/api/v1/me/profile") { jsonBody(alice, ProfileUpdate(displayName = "Alice")) }
+        assertEquals(HttpStatusCode.NoContent, profile.status)
+        val link = client.invite(alice, space.id, Role.VIEWER)
+        assertEquals("Alice", client.preview(bob, link.token).body<InvitePreview>().inviterName)
+    }
+
+    @Test
+    fun previewWithoutInviterNameIsNull() = withApp { client ->
+        val space = client.createSpace(alice, "Trip")
+        val link = client.invite(alice, space.id, Role.VIEWER)
+        val preview = client.preview(bob, link.token)
+        assertEquals(HttpStatusCode.OK, preview.status)
+        assertNull(preview.body<InvitePreview>().inviterName)
     }
 
     @Test
@@ -101,10 +145,11 @@ class InviteRoutesTest {
         val link = invites.create(UUID.fromString(space.id), owner, Role.VIEWER)
         assertEquals(1_000L + 24 * 60 * 60 * 1000, link.expiresAt)
         clock = link.expiresAt - 1
-        assertEquals(Role.VIEWER, invites.preview(link.token)?.role)
+        assertEquals(InviteState.VALID, invites.preview(link.token)?.state)
         clock = link.expiresAt
-        assertNull(invites.preview(link.token))
-        assertNull(invites.accept(link.token, joiner, spaces))
+        assertEquals(InviteState.EXPIRED, invites.preview(link.token)?.state)
+        assertEquals(AcceptResult.Expired, invites.accept(link.token, joiner, spaces))
+        assertNull(spaces.membership(UUID.fromString(space.id), joiner))
     }
 
     @Test
@@ -124,6 +169,30 @@ class InviteRoutesTest {
         assertEquals(Role.EDITOR, client.accept(bob, link.token).body<SpaceResponse>().role)
         assertEquals(Role.OWNER, client.accept(alice, link.token).body<SpaceResponse>().role)
         assertEquals(Role.VIEWER, client.accept(carol, link.token).body<SpaceResponse>().role)
+    }
+
+    @Test
+    fun memberReopeningAUsedOrExpiredInviteGetsTheSpace() = withApp { client ->
+        val space = client.sharedSpace(alice, "Trip", carol to Role.VIEWER)
+        val used = client.invite(alice, space.id, Role.EDITOR)
+        assertEquals(HttpStatusCode.OK, client.accept(bob, used.token).status)
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
+        val expired = InviteRepository(TestDb.database, ttlDays = 7, now = { eightDaysAgo })
+            .create(UUID.fromString(space.id), aliceId, Role.EDITOR)
+        val before = inviteRows()
+
+        val reopened = client.accept(bob, used.token)
+        assertEquals(HttpStatusCode.OK, reopened.status)
+        assertEquals(SpaceResponse(space.id, "Trip", Role.EDITOR, personal = false, memberCount = 3), reopened.body())
+        val viaExpired = client.accept(carol, expired.token)
+        assertEquals(HttpStatusCode.OK, viaExpired.status)
+        assertEquals(SpaceResponse(space.id, "Trip", Role.VIEWER, personal = false, memberCount = 3), viaExpired.body())
+        assertEquals(before, inviteRows())
+    }
+
+    private fun inviteRows() = transaction(TestDb.database) {
+        Invites.selectAll().map { row -> Invites.columns.map { row[it] } }.sortedBy { it.first().toString() }
     }
 
     @Test
@@ -193,7 +262,8 @@ class InviteRoutesTest {
         } finally {
             pool.shutdown()
         }
-        assertEquals(1, results.count { it != null }, "$results")
+        assertEquals(1, results.count { it is AcceptResult.Joined }, "$results")
+        assertEquals(joiners.size - 1, results.count { it == AcceptResult.Used }, "$results")
         assertEquals(2, spaces.get(UUID.fromString(space.id), owner)?.memberCount)
     }
 }

@@ -39,6 +39,7 @@ class OpenApiTest {
         assertEquals("https://x.test/myapp/api/v1", OpenApi.document("https://x.test/myapp/").serverUrl())
     }
 
+    // cmpose:sample
     @Test
     fun listsTheItemRoutes() {
         val paths = OpenApi.document(null)["paths"]!!.jsonObject
@@ -48,6 +49,7 @@ class OpenApiTest {
             .map { it.jsonObject }.single { it["name"]!!.jsonPrimitive.content == "limit" }
         assertEquals(JsonPrimitive(200), limit["schema"]!!.jsonObject["maximum"])
     }
+    // /cmpose:sample
 
     @Test
     fun everyRefResolves() {
@@ -75,7 +77,10 @@ class OpenApiTest {
     @Test
     fun listsEveryRouteAndNothingElse() {
         val expected = buildSet {
-            addAll(listOf("/me", "/files", "/files/{id}", "/items", "/items/{id}"))
+            addAll(listOf("/me", "/me/profile", "/files", "/files/{id}"))
+            // cmpose:sample
+            addAll(listOf("/items", "/items/{id}"))
+            // /cmpose:sample
             // cmpose:sharing
             addAll(listOf("/spaces", "/spaces/{id}", "/spaces/{id}/members", "/spaces/{id}/members/{userId}"))
             addAll(listOf("/spaces/{id}/leave", "/spaces/{id}/invites", "/invites/preview", "/invites/accept"))

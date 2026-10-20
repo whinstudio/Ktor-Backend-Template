@@ -1,6 +1,8 @@
 package io.cmpose.backendtemplate
 
+// cmpose:sample
 import io.cmpose.backendtemplate.feature.sample.ItemDraft
+// /cmpose:sample
 import io.cmpose.backendtemplate.files.FileResponse
 import io.cmpose.backendtemplate.files.StoredFiles
 import io.cmpose.backendtemplate.sharing.Invites
@@ -50,7 +52,9 @@ class SharingDeletionTest {
         assertEquals(HttpStatusCode.Created, client.upload(alice).status)
         assertEquals(HttpStatusCode.Created, client.upload(bob, spaceId = owned.id).status)
         val aliceInBobs = client.upload(alice, spaceId = bobs.id).body<FileResponse>().id
+        // cmpose:sample
         val itemInBobs = client.createItem(alice, ItemDraft("Tickets", spaceId = bobs.id)).id
+        // /cmpose:sample
         assertEquals(3, dir.listDirectoryEntries().size)
 
         assertEquals(HttpStatusCode.NoContent, client.delete("/api/v1/me") { bearerAuth(alice) }.status)
@@ -70,6 +74,8 @@ class SharingDeletionTest {
         assertEquals(2, bobsNow.memberCount)
         assertEquals(Role.VIEWER, client.spaces(carol).single { it.id == bobs.id }.role)
         assertEquals(HttpStatusCode.OK, client.get("/api/v1/files/$aliceInBobs") { bearerAuth(carol) }.status)
+        // cmpose:sample
         assertEquals(HttpStatusCode.OK, client.getItem(carol, itemInBobs).status)
+        // /cmpose:sample
     }
 }
