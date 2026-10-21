@@ -11,6 +11,9 @@ that the server repository takes in; nothing shared is edited by hand to add an 
 | `sql/create-cmpose-app.sql` | copied to the server and run once (step 1), then deleted |
 | `Dockerfile` | used by CI only; the image is `ghcr.io/<owner>/cmpose-app` |
 
+The `Dockerfile` pins its base images by digest (`<image>:<tag>@sha256:…`), so a rebuild uses the same bytes until
+Dependabot's `docker` updates (configured for `/deploy`) open a pull request that moves the digest.
+
 All values below (`<owner>`, `<domain>`, passwords, project ids) are placeholders.
 
 ## Server repository contract
