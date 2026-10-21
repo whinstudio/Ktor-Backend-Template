@@ -6,6 +6,7 @@ import io.cmpose.backendtemplate.sharing.InvitePreview
 import io.cmpose.backendtemplate.sharing.InviteRepository
 import io.cmpose.backendtemplate.sharing.InviteResponse
 import io.cmpose.backendtemplate.sharing.InviteState
+import io.cmpose.backendtemplate.sharing.MemberResponse
 import io.cmpose.backendtemplate.sharing.Invites
 import io.cmpose.backendtemplate.sharing.PendingInvite
 import io.cmpose.backendtemplate.sharing.RevokeResult
@@ -17,6 +18,8 @@ import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserRepository
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.get
 import io.ktor.client.request.put
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -50,6 +53,7 @@ class InviteRoutesTest {
     private val alice = TestKeys.token(sub = "alice")
     private val bob = TestKeys.token(sub = "bob")
     private val carol = TestKeys.token(sub = "carol")
+    private val dave = TestKeys.token(sub = "dave")
 
     private fun withApp(
         config: io.cmpose.backendtemplate.config.AppConfig = testConfig(),
@@ -256,6 +260,17 @@ class InviteRoutesTest {
     }
 
     @Test
+    fun inviteListSkipsTheSensitiveLimit() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 1)) { client ->
+        val space = client.createSpace(alice, "Trip")
+        // The members screen lists on every load: that must not use up the owner's sensitive budget.
+        repeat(2) { assertEquals(HttpStatusCode.OK, client.pendingInvites(alice, space.id).status) }
+        val link = client.invite(alice, space.id, Role.VIEWER)
+        // The revoke still counts against the sensitive limit, which the create used up.
+        assertEquals(HttpStatusCode.TooManyRequests, client.revoke(alice, space.id, link.id).status)
+        assertEquals(listOf(link.id), client.pending(space.id).map { it.id })
+    }
+
+    @Test
     fun concurrentAcceptsUseAnInviteOnce() {
         val db = TestDb.database
         val users = UserRepository(db)
@@ -369,6 +384,26 @@ class InviteRoutesTest {
         assertEquals(SpaceResponse(space.id, "Trip", Role.EDITOR, personal = false, memberCount = 2), again.body())
         assertEquals(HttpStatusCode.OK, client.accept(alice, second.token).status)
         assertEquals(InviteState.VALID, client.state(second.token))
+    }
+
+    @Test
+    fun loweredMemberQuotaKeepsMembers() {
+        lateinit var space: SpaceResponse
+        withApp { client -> space = client.sharedSpace(alice, "Trip", bob to Role.EDITOR, carol to Role.VIEWER) }
+        withApp(testConfig().copy(maxMembersPerSpace = 2)) { client ->
+            // Three members in a space now capped at two: nobody is removed, each keeps the space and the role.
+            val members = client.get("/api/v1/spaces/${space.id}/members") { bearerAuth(alice) }
+            assertEquals(HttpStatusCode.OK, members.status)
+            assertEquals(3, members.body<List<MemberResponse>>().size)
+            assertEquals(Role.EDITOR, client.spaces(bob).single { it.id == space.id }.role)
+            assertEquals(Role.VIEWER, client.spaces(carol).single { it.id == space.id }.role)
+            assertEquals(3, client.spaces(alice).single { it.id == space.id }.memberCount)
+            // Only a new member is refused.
+            val link = client.invite(alice, space.id, Role.VIEWER)
+            client.accept(dave, link.token).assertQuotaExceeded("members")
+            assertTrue(client.spaces(dave).none { it.id == space.id })
+            assertEquals(InviteState.VALID, client.state(link.token))
+        }
     }
 
     @Test

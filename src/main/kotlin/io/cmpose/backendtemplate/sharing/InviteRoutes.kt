@@ -34,19 +34,21 @@ private fun inviteUsed(): Nothing =
  * user previews and accepts one. An unknown or malformed token is a 404; a known one previews with its state, and
  * accepting it answers 409 `INVITE_USED` once used, 410 `INVITE_REVOKED` once revoked and 410 `INVITE_EXPIRED` once
  * expired. Revoking a used invite is a 409 `INVITE_USED`; an invite id of another space, or no UUID, is a 404. Every
- * invite route counts against [SENSITIVE_LIMIT]: tokens cannot be guessed at speed, nor invites minted in bulk.
+ * invite route but the list counts against [SENSITIVE_LIMIT]: tokens cannot be guessed at speed, nor invites minted
+ * or revoked in bulk. The list is a read, like the members list, so only the global limit counts it: the owner's
+ * members screen loads it each time without spending the sensitive budget.
  */
 fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
+    get("/api/v1/spaces/{id}/invites") {
+        val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
+        call.respond(invites.pending(membership.spaceId))
+    }
     rateLimit(SENSITIVE_LIMIT) {
         post("/api/v1/spaces/{id}/invites") {
             val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
             val role = call.receive<InviteRequest>().role
             if (role == Role.OWNER) badRequest("The owner role cannot be granted")
             call.respond(HttpStatusCode.Created, invites.create(membership.spaceId, membership.userId, role))
-        }
-        get("/api/v1/spaces/{id}/invites") {
-            val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
-            call.respond(invites.pending(membership.spaceId))
         }
         delete("/api/v1/spaces/{id}/invites/{inviteId}") {
             val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
