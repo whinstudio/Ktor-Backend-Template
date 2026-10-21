@@ -64,10 +64,12 @@ and the tests.
 
   Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
   `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
-  `UPLOADS_BUSY`. A 500 carries no detail beyond the request id.
+  `UPLOADS_BUSY`, `QUOTA_EXCEEDED` (409, with `quota` naming the limit reached: `storage`). A 500 carries no detail
+  beyond the request id.
 <!-- cmpose:sharing -->
   With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
-  (409, already used) and `INVITE_EXPIRED` (410).
+  (409, already used; also on revoking a used one), `INVITE_REVOKED` (410, revoked by an owner) and `INVITE_EXPIRED`
+  (410). `QUOTA_EXCEEDED`'s `quota` may also be `spaces`, `members` or `invites`.
 <!-- /cmpose:sharing -->
 - Headers:
   - Every response has `X-App-Version` (`APP_VERSION`) and `X-Request-Id`: the client's own id when it sends a safe
@@ -75,6 +77,14 @@ and the tests.
     problem; the logs carry it.
   - The app sends `X-Client-Version`. Below `MIN_CLIENT_VERSION` the answer is 426 `CLIENT_UPGRADE_REQUIRED` with
     `minVersion`; a malformed value is 400; no header passes.
+  - An app built before a server change may misread its new answers: one built before the quotas does not know
+    `QUOTA_EXCEEDED` and shows a general error instead of the quota message.
+<!-- cmpose:sharing -->
+    One built before invite revocation shows a `revoked` invite preview as an unknown error, takes
+    `QUOTA_EXCEEDED` on accepting an invite for "already used" (both are 409) and `INVITE_REVOKED` for "expired".
+<!-- /cmpose:sharing -->
+    After deploying such a server, raise `MIN_CLIENT_VERSION` to the first app release that knows the new answers,
+    so older apps are sent to update.
   - A rate-limited request gets 429 `RATE_LIMITED` with `Retry-After`.
 - A missing or invalid token is 401 `UNAUTHORIZED`. When Google's keys cannot be fetched and none is cached, the answer
   is 503 `AUTH_UNAVAILABLE`, so the app retries instead of signing out.
@@ -84,6 +94,14 @@ and the tests.
   With sharing, a non-member of a space and a member whose role is too low both get 404.
 <!-- /cmpose:sharing -->
 - Lists page with `limit` and an opaque `cursor`; the response's `nextCursor` is `null` on the last page.
+<!-- cmpose:sharing -->
+- Invites: an OWNER lists a space's valid invites with `GET /api/v1/spaces/{id}/invites` (newest first, at most 200,
+  not paged; `id`, `role`, `createdAt`, `expiresAt`, never the token) and revokes one with
+  `DELETE /api/v1/spaces/{id}/invites/{inviteId}` (204, also when called again; 409 `INVITE_USED` once used; another
+  space's invite or an id that is no UUID is 404). A revoked invite keeps previewing as `revoked`, even once it has
+  expired, and stops counting against `MAX_PENDING_INVITES_PER_SPACE`. The list counts against the global rate limit
+  only, as the members list does; the revoke, like creating, previewing and accepting, also against the sensitive one.
+<!-- /cmpose:sharing -->
 
 ## Configuration
 

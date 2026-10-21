@@ -2,9 +2,11 @@ package io.cmpose.backendtemplate
 
 import io.cmpose.backendtemplate.auth.requireUser
 import io.cmpose.backendtemplate.plugins.FieldError
+import io.cmpose.backendtemplate.plugins.Quota
 import io.cmpose.backendtemplate.plugins.SENSITIVE_LIMIT
 import io.cmpose.backendtemplate.plugins.badRequest
 import io.cmpose.backendtemplate.plugins.notFound
+import io.cmpose.backendtemplate.plugins.quotaExceeded
 import io.ktor.server.application.Application
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receive
@@ -30,6 +32,7 @@ fun Application.testRoutes() {
         get("/test/boom") { error("db password=x") }
         get("/test/missing") { notFound() }
         get("/test/invalid") { badRequest("Invalid input", listOf(FieldError("name", "must not be blank"))) }
+        get("/test/quota") { quotaExceeded(Quota.STORAGE) }
         get("/test/whoami") { call.respondText(call.requireUser().toString()) }
         rateLimit(SENSITIVE_LIMIT) {
             get("/test/sensitive") { call.respondText("ok") }

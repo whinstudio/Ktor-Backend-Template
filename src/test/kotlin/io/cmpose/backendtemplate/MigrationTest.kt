@@ -22,5 +22,9 @@ class MigrationTest {
         // cmpose:sharing-off: val expected = core
         val expected = (core + listOf("invites", "space_members", "spaces")).sorted()
         assertEquals(expected, tables)
+        // cmpose:sharing
+        val sql = "SELECT 1 FROM information_schema.columns WHERE table_name = 'invites' AND column_name = 'revoked_at'"
+        assertEquals(true, transaction(db) { exec(sql) { it.next() } }, "V5__invite_revoke.sql ran")
+        // /cmpose:sharing
     }
 }

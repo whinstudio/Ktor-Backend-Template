@@ -156,6 +156,40 @@ class ErrorFormatTest {
     }
 
     @Test
+    fun quotaExceededIs409WithTheQuota() {
+        lateinit var error: JsonObject
+        lateinit var status: HttpStatusCode
+        val logs = capturedLogs {
+            testApplication {
+                application {
+                    module(testDeps())
+                    testRoutes()
+                }
+                val response = client.get("/test/quota")
+                status = response.status
+                error = response.error()
+            }
+        }
+        assertEquals(HttpStatusCode.Conflict, status)
+        assertEquals("QUOTA_EXCEEDED", error["code"]!!.jsonPrimitive.content)
+        assertEquals("Storage quota reached", error["message"]!!.jsonPrimitive.content)
+        assertEquals("storage", error["quota"]!!.jsonPrimitive.content)
+        assertTrue(error["requestId"]!!.jsonPrimitive.content.isNotEmpty())
+        assertTrue(logs.any { it.level == Level.INFO && it.formattedMessage == "Quota exceeded (storage)" })
+    }
+
+    @Test
+    fun otherErrorsCarryNoQuota() = testApplication {
+        application {
+            module(testDeps())
+            testRoutes()
+        }
+        // Like `fields`, an unset quota is left out of the body, not written as null.
+        assertFalse("quota" in client.get("/test/invalid").error())
+        assertFalse("quota" in client.get("/test/missing").error())
+    }
+
+    @Test
     fun wrongMethodIs405() = testApplication {
         application {
             module(testDeps())

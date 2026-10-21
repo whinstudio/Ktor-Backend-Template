@@ -25,6 +25,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
@@ -58,15 +59,34 @@ class FileRoutesTest {
         dir = createTempDirectory("files-test")
     }
 
-    private fun withApp(maxUploadBytes: Long = 10_485_760L, block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) =
-        testApplication {
-            val config = testConfig().copy(filesDir = dir.toString(), maxUploadBytes = maxUploadBytes)
-            application { module(authDeps(config = config)) }
-            block(jsonClient())
-        }
+    private fun withApp(
+        maxUploadBytes: Long = 10_485_760L,
+        maxStorageBytesPerUser: Long = 0L,
+        block: suspend ApplicationTestBuilder.(HttpClient) -> Unit,
+    ) = testApplication {
+        val config = testConfig().copy(
+            filesDir = dir.toString(),
+            maxUploadBytes = maxUploadBytes,
+            maxStorageBytesPerUser = maxStorageBytesPerUser,
+        )
+        application { module(authDeps(config = config)) }
+        block(jsonClient())
+    }
 
     private suspend fun HttpResponse.errorCode() =
         Json.parseToJsonElement(bodyAsText()).jsonObject["error"]!!.jsonObject["code"]!!.jsonPrimitive.content
+
+    private suspend fun HttpResponse.quota() =
+        Json.parseToJsonElement(bodyAsText()).jsonObject["error"]!!.jsonObject["quota"]?.jsonPrimitive?.content
+
+    /** A PNG of exactly [size] bytes: [PNG_BYTES] padded with zeros. */
+    private fun pngOf(size: Int) = PNG_BYTES + ByteArray(size - PNG_BYTES.size)
+
+    private suspend fun assertQuotaExceeded(response: HttpResponse) {
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertEquals("QUOTA_EXCEEDED", response.errorCode())
+        assertEquals("storage", response.quota())
+    }
 
     private fun rowCount() = transaction(TestDb.database) { StoredFiles.selectAll().count() }
 
@@ -204,6 +224,72 @@ class FileRoutesTest {
         assertEquals(2L, rowCount())
     }
 
+    @Test
+    fun uploadWithinStorageQuotaPasses() = withApp(maxStorageBytesPerUser = 1000) { client ->
+        assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status)
+        // Exactly at the limit still passes: only going past it is refused.
+        assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(400)).status)
+        assertEquals(2L, rowCount())
+    }
+
+    @Test
+    fun uploadOverStorageQuotaIs409() = withApp(maxStorageBytesPerUser = 1000) { client ->
+        client.upload(alice, pngOf(600))
+        client.upload(alice, pngOf(400))
+        val filesBefore = dir.listDirectoryEntries().size
+        // The smallest file the sniffer accepts; any byte past the limit is refused.
+        assertQuotaExceeded(client.upload(alice, PNG_BYTES))
+        assertEquals(2L, rowCount())
+        assertEquals(filesBefore, dir.listDirectoryEntries().size)
+        // The quota is per user: another user still uploads.
+        assertEquals(HttpStatusCode.Created, client.upload(bob, pngOf(600)).status)
+    }
+
+    @Test
+    fun zeroStorageQuotaIsOff() = withApp(maxStorageBytesPerUser = 0) { client ->
+        repeat(3) { assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status) }
+        assertEquals(3L, rowCount())
+    }
+
+    @Test
+    fun loweredStorageQuotaKeepsFiles() {
+        val ids = mutableListOf<String>()
+        withApp { client -> repeat(2) { ids += client.upload(alice, pngOf(600)).body<Uploaded>().id } }
+        withApp(maxStorageBytesPerUser = 1) { client ->
+            ids.forEach { id ->
+                val read = client.get("/api/v1/files/$id") { bearerAuth(alice) }
+                assertEquals(HttpStatusCode.OK, read.status)
+                assertContentEquals(pngOf(600), read.bodyAsBytes())
+            }
+            assertQuotaExceeded(client.upload(alice))
+        }
+        assertEquals(2L, rowCount())
+    }
+
+    @Test
+    fun concurrentUploadsCannotBothPassTheQuota() = assertNoDeadlock {
+        withApp(maxStorageBytesPerUser = 1000) { client ->
+            assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status)
+            // Either 300 alone fits (900); both together (1200) do not. One upload stops at its insert with the user
+            // row locked, the other at that row; without the lock both would count 600 and stop at the insert.
+            val responses = InsertGate("files").use { gate ->
+                coroutineScope {
+                    val uploads = List(2) { async { client.upload(alice, pngOf(300)) } }
+                    gate.awaitWaiting(2)
+                    gate.close()
+                    uploads.awaitAll()
+                }
+            }
+            assertEquals(
+                listOf(HttpStatusCode.Created, HttpStatusCode.Conflict),
+                responses.map { it.status }.sortedBy { it.value },
+            )
+            assertQuotaExceeded(responses.single { it.status == HttpStatusCode.Conflict })
+        }
+        assertEquals(2L, rowCount())
+        assertEquals(2, dir.listDirectoryEntries().size)
+    }
+
     // cmpose:sharing
     private val carol = TestKeys.token(sub = "carol")
 
@@ -250,6 +336,44 @@ class FileRoutesTest {
         assertEquals(0L, rowCount())
         assertTrue(dir.listDirectoryEntries().isEmpty())
     }
+
+    @Test
+    fun editorUploadCountsAgainstTheOwner() = withApp(maxStorageBytesPerUser = 1000) { client ->
+        val space = client.sharedSpace(alice, "Trip", bob to Role.EDITOR)
+        // Alice's own space counts too: the total is over every space she owns.
+        assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status)
+        assertQuotaExceeded(client.upload(bob, pngOf(500), spaceId = space.id))
+        // Bob's personal space is his own: his quota, still empty.
+        assertEquals(HttpStatusCode.Created, client.upload(bob, pngOf(500)).status)
+        assertEquals(2L, rowCount())
+        assertEquals(2, dir.listDirectoryEntries().size)
+    }
+
+    @Test
+    fun crossEditorUploadsDoNotDeadlock() {
+        // A deadlock would not show in the answers: the losing transaction is retried (and logged), then passes.
+        assertNoDeadlock {
+            testApplication {
+                val store = PairedStore(LocalDiskFileStore(dir))
+                val config = testConfig().copy(filesDir = dir.toString(), maxStorageBytesPerUser = 1000)
+                application { module(AppDeps(config, TestKeys.jwkProvider, TestDb.database, store)) }
+                val client = jsonClient()
+                val aliceSpace = client.sharedSpace(alice, "Alice's", bob to Role.EDITOR)
+                val bobSpace = client.sharedSpace(bob, "Bob's", alice to Role.EDITOR)
+                // Each upload locks the other's quota row, and its insert's foreign key then checks its uploader's.
+                store.paired = true
+                val responses = coroutineScope {
+                    awaitAll(
+                        async { client.upload(alice, pngOf(300), spaceId = bobSpace.id) },
+                        async { client.upload(bob, pngOf(300), spaceId = aliceSpace.id) },
+                    )
+                }
+                assertEquals(listOf(HttpStatusCode.Created, HttpStatusCode.Created), responses.map { it.status })
+            }
+        }
+        assertEquals(2L, rowCount())
+    }
+
     // /cmpose:sharing
 
     /** Holds every write until [release] opens; [entered] completes once a write waits, i.e. an upload holds a permit. */
@@ -263,6 +387,22 @@ class FileRoutesTest {
             return inner.write(bytes)
         }
     }
+
+    // cmpose:sharing
+    /** Once [paired] is set, holds each write until a second one arrives, so the two reach the database together. */
+    private class PairedStore(private val inner: FileStore) : FileStore by inner {
+        @Volatile var paired = false
+        private val both = CountDownLatch(2)
+
+        override fun write(bytes: ByteArray): String {
+            if (paired) {
+                both.countDown()
+                check(both.await(10, TimeUnit.SECONDS)) { "the second write never came" }
+            }
+            return inner.write(bytes)
+        }
+    }
+    // /cmpose:sharing
 
     /** A body sent without `Content-Length`, so only the limit counting while reading can catch it. */
     private class Chunked(private val bytes: ByteArray, override val contentType: ContentType) :

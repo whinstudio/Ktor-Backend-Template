@@ -84,6 +84,7 @@ class OpenApiTest {
             // cmpose:sharing
             addAll(listOf("/spaces", "/spaces/{id}", "/spaces/{id}/members", "/spaces/{id}/members/{userId}"))
             addAll(listOf("/spaces/{id}/leave", "/spaces/{id}/invites", "/invites/preview", "/invites/accept"))
+            add("/spaces/{id}/invites/{inviteId}")
             // /cmpose:sharing
         }
         assertEquals(expected, OpenApi.document(null)["paths"]!!.jsonObject.keys)

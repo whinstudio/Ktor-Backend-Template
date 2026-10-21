@@ -10,10 +10,15 @@ import io.cmpose.backendtemplate.users.MeResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 
 /** Our own user id for [token] (creating the user on first sight). */
@@ -45,6 +50,12 @@ suspend fun HttpClient.preview(token: String, inviteToken: String): HttpResponse
 suspend fun HttpClient.accept(token: String, inviteToken: String): HttpResponse =
     post("/api/v1/invites/accept") { jsonBody(token, InviteToken(inviteToken)) }
 
+suspend fun HttpClient.pendingInvites(token: String, spaceId: String): HttpResponse =
+    get("/api/v1/spaces/$spaceId/invites") { bearerAuth(token) }
+
+suspend fun HttpClient.revoke(token: String, spaceId: String, inviteId: String): HttpResponse =
+    delete("/api/v1/spaces/$spaceId/invites/$inviteId") { bearerAuth(token) }
+
 /** [owner] creates a space named [name]; each of [members] joins it through an invite with its role. */
 suspend fun HttpClient.sharedSpace(owner: String, name: String, vararg members: Pair<String, Role>): SpaceResponse {
     val space = createSpace(owner, name)
@@ -52,4 +63,12 @@ suspend fun HttpClient.sharedSpace(owner: String, name: String, vararg members: 
         assertEquals(HttpStatusCode.OK, accept(token, invite(owner, space.id, role).token).status)
     }
     return space
+}
+
+/** A 409 `QUOTA_EXCEEDED` naming [quota]. */
+suspend fun HttpResponse.assertQuotaExceeded(quota: String) {
+    assertEquals(HttpStatusCode.Conflict, status)
+    val error = Json.parseToJsonElement(bodyAsText()).jsonObject["error"]!!.jsonObject
+    assertEquals("QUOTA_EXCEEDED", error["code"]!!.jsonPrimitive.content)
+    assertEquals(quota, error["quota"]?.jsonPrimitive?.content)
 }

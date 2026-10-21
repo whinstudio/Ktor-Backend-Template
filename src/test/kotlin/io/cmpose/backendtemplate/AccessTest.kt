@@ -1,10 +1,12 @@
 package io.cmpose.backendtemplate
 
+import io.cmpose.backendtemplate.sharing.PendingInvite
 import io.cmpose.backendtemplate.sharing.Role
 import io.cmpose.backendtemplate.sharing.RoleChange
 import io.cmpose.backendtemplate.sharing.SpaceDraft
 import io.cmpose.backendtemplate.sharing.atLeast
 import io.ktor.client.HttpClient
+import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
@@ -38,11 +40,16 @@ class AccessTest {
         block(jsonClient())
     }
 
-    /** Every call an OWNER may make on [spaceId] (and [memberId]'s membership), made with [token]. */
-    private fun ownerCalls(client: HttpClient, spaceId: String, memberId: String, token: String) =
+    /**
+     * Every call an OWNER may make on [spaceId] (and [memberId]'s membership, and the space's pending invite
+     * [inviteId]), made with [token].
+     */
+    private fun ownerCalls(client: HttpClient, spaceId: String, memberId: String, inviteId: String, token: String) =
         listOf<Pair<String, suspend () -> HttpResponse>>(
             "rename" to { client.patch("/api/v1/spaces/$spaceId") { jsonBody(token, SpaceDraft("X")) } },
             "invite" to { client.inviteResponse(token, spaceId, Role.VIEWER) },
+            "pending invites" to { client.pendingInvites(token, spaceId) },
+            "revoke invite" to { client.revoke(token, spaceId, inviteId) },
             "set role" to {
                 client.patch("/api/v1/spaces/$spaceId/members/$memberId") { jsonBody(token, RoleChange(Role.EDITOR)) }
             },
@@ -58,16 +65,22 @@ class AccessTest {
         }
     }
 
+    /** The ids of [spaceId]'s pending invites, as its owner [token] lists them. */
+    private suspend fun HttpClient.pendingIds(token: String, spaceId: String) =
+        pendingInvites(token, spaceId).body<List<PendingInvite>>().map { it.id }
+
     @Test
     fun nonMemberGets404Everywhere() = withApp { client ->
         val space = client.createSpace(alice, "Trip")
         val aliceId = client.userId(alice)
+        val inviteId = client.invite(alice, space.id, Role.VIEWER).id
         val readCalls = listOf<Pair<String, suspend () -> HttpResponse>>(
             "members" to { client.get("/api/v1/spaces/${space.id}/members") { bearerAuth(bob) } },
             "leave" to { client.post("/api/v1/spaces/${space.id}/leave") { bearerAuth(bob) } },
             "upload" to { client.upload(bob, spaceId = space.id) },
         )
-        assertAllNotFound(ownerCalls(client, space.id, aliceId, bob) + readCalls)
+        assertAllNotFound(ownerCalls(client, space.id, aliceId, inviteId, bob) + readCalls)
+        assertEquals(listOf(inviteId), client.pendingIds(alice, space.id))
         assertFalse(client.spaces(bob).any { it.id == space.id })
         assertEquals(listOf("Trip"), client.spaces(alice).filter { !it.personal }.map { it.name })
     }
@@ -76,7 +89,10 @@ class AccessTest {
     fun viewerCannotWrite() = withApp { client ->
         val space = client.sharedSpace(alice, "Trip", bob to Role.VIEWER, carol to Role.VIEWER)
         val carolId = client.userId(carol)
-        assertAllNotFound(ownerCalls(client, space.id, carolId, bob) + ("upload" to { client.upload(bob, spaceId = space.id) }))
+        val inviteId = client.invite(alice, space.id, Role.VIEWER).id
+        val calls = ownerCalls(client, space.id, carolId, inviteId, bob)
+        assertAllNotFound(calls + ("upload" to { client.upload(bob, spaceId = space.id) }))
+        assertEquals(listOf(inviteId), client.pendingIds(alice, space.id))
         assertEquals(HttpStatusCode.OK, client.get("/api/v1/spaces/${space.id}/members") { bearerAuth(bob) }.status)
         assertEquals("Trip", client.spaces(alice).single { it.id == space.id }.name)
     }
@@ -85,7 +101,9 @@ class AccessTest {
     fun editorCannotManageMembersOrTheSpace() = withApp { client ->
         val space = client.sharedSpace(alice, "Trip", bob to Role.EDITOR, carol to Role.VIEWER)
         val carolId = client.userId(carol)
-        assertAllNotFound(ownerCalls(client, space.id, carolId, bob))
+        val inviteId = client.invite(alice, space.id, Role.VIEWER).id
+        assertAllNotFound(ownerCalls(client, space.id, carolId, inviteId, bob))
+        assertEquals(listOf(inviteId), client.pendingIds(alice, space.id))
         assertEquals(Role.VIEWER, client.spaces(carol).single { it.id == space.id }.role)
         assertEquals(HttpStatusCode.Created, client.upload(bob, spaceId = space.id).status)
     }
@@ -94,7 +112,8 @@ class AccessTest {
     fun ownerMayDoEverything() = withApp { client ->
         val space = client.sharedSpace(alice, "Trip", bob to Role.VIEWER)
         val bobId = client.userId(bob)
-        ownerCalls(client, space.id, bobId, alice).forEach { (name, call) ->
+        val inviteId = client.invite(alice, space.id, Role.VIEWER).id
+        ownerCalls(client, space.id, bobId, inviteId, alice).forEach { (name, call) ->
             assertTrue(call().status.value in 200..299, name)
         }
     }
@@ -122,6 +141,8 @@ class AccessTest {
             { client.delete("/api/v1/spaces/$id") },
             { client.post("/api/v1/spaces/$id/leave") },
             { client.post("/api/v1/spaces/$id/invites") },
+            { client.get("/api/v1/spaces/$id/invites") },
+            { client.delete("/api/v1/spaces/$id/invites/$id") },
             { client.post("/api/v1/invites/preview") },
             { client.post("/api/v1/invites/accept") },
         )

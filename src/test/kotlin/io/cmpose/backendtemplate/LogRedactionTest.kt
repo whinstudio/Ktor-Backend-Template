@@ -1,6 +1,8 @@
 package io.cmpose.backendtemplate
 
 import io.cmpose.backendtemplate.db.connectDatabase
+import io.cmpose.backendtemplate.sharing.InviteResponse
+import io.cmpose.backendtemplate.sharing.Role
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.post
@@ -65,6 +67,25 @@ class LogRedactionTest {
         }.map { it.fullText() }
         assertTrue(logs.any { it.contains("/api/v1/invites/{token}/accept") }, logs.joinToString("\n"))
         assertNotLogged(logs, code)
+    }
+
+    @Test
+    fun listingAndRevokingInvitesLogsNeitherTokenNorInviteId() {
+        val owner = TestKeys.token(sub = "alice")
+        lateinit var link: InviteResponse
+        val logs = appLogs {
+            testApplication {
+                application { module(authDeps()) }
+                val client = jsonClient()
+                val space = client.createSpace(owner, "Trip")
+                link = client.invite(owner, space.id, Role.VIEWER)
+                assertEquals(HttpStatusCode.OK, client.pendingInvites(owner, space.id).status)
+                assertEquals(HttpStatusCode.NoContent, client.revoke(owner, space.id, link.id).status)
+                assertEquals(HttpStatusCode.NoContent, client.revoke(owner, space.id, link.id).status)
+            }
+        }.map { it.fullText() }
+        assertTrue(logs.any { it.startsWith("Invite revoked") }, logs.joinToString("\n"))
+        assertNotLogged(logs, link.token, link.id)
     }
     // /cmpose:sharing
 

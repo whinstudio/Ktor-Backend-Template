@@ -1,6 +1,7 @@
 package io.cmpose.backendtemplate
 
 import io.cmpose.backendtemplate.auth.VerifiedIdentity
+import io.cmpose.backendtemplate.config.AppConfig
 import io.cmpose.backendtemplate.files.StoredFiles
 import io.cmpose.backendtemplate.sharing.Invites
 import io.cmpose.backendtemplate.sharing.PERSONAL_SPACE_NAME
@@ -24,6 +25,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.nio.file.Path
@@ -50,8 +54,11 @@ class SpaceRoutesTest {
     private val alice = TestKeys.token(sub = "alice")
     private val bob = TestKeys.token(sub = "bob")
 
-    private fun withApp(block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {
-        application { module(authDeps(config = testConfig().copy(filesDir = dir.toString()))) }
+    private fun withApp(
+        config: AppConfig = testConfig(),
+        block: suspend ApplicationTestBuilder.(HttpClient) -> Unit,
+    ) = testApplication {
+        application { module(authDeps(config = config.copy(filesDir = dir.toString()))) }
         block(jsonClient())
     }
 
@@ -159,5 +166,67 @@ class SpaceRoutesTest {
         assertEquals(listOf(PERSONAL_SPACE_NAME), client.spaces(bob).map { it.name })
         assertEquals(HttpStatusCode.NotFound, client.get("/api/v1/spaces/${space.id}/members") { bearerAuth(alice) }.status)
         assertTrue(client.spaces(alice).none { it.id == space.id })
+    }
+
+    private fun ownedSharedSpacesOf(user: String) = transaction(TestDb.database) {
+        Spaces.selectAll().where { Spaces.ownerId eq UUID.fromString(user) }.count { !it[Spaces.isPersonal] }
+    }
+
+    @Test
+    fun spaceQuotaCountsOwnedSharedSpaces() = withApp(testConfig().copy(maxSpacesPerUser = 2)) { client ->
+        // Neither her personal space nor the space Bob invited her into counts against Alice.
+        client.sharedSpace(bob, "Bob's", alice to Role.EDITOR)
+        client.createSpace(alice, "One")
+        client.createSpace(alice, "Two")
+        client.post("/api/v1/spaces") { jsonBody(alice, SpaceDraft("Three")) }.assertQuotaExceeded("spaces")
+        assertEquals(2, ownedSharedSpacesOf(client.userId(alice)))
+        assertEquals(
+            listOf(PERSONAL_SPACE_NAME, "Bob's", "One", "Two"),
+            client.spaces(alice).map { it.name },
+        )
+        // The quota is per user: Bob, at one space, still creates another.
+        client.createSpace(bob, "Bob's second")
+    }
+
+    @Test
+    fun loweredSpaceQuotaKeepsSpaces() {
+        val ids = mutableListOf<String>()
+        withApp { client -> listOf("One", "Two", "Three").forEach { ids += client.createSpace(alice, it).id } }
+        withApp(testConfig().copy(maxSpacesPerUser = 2)) { client ->
+            // Three spaces under a quota of two: all stay listed and usable; only a new one is refused.
+            assertEquals(ids.toSet(), client.spaces(alice).filter { !it.personal }.map { it.id }.toSet())
+            ids.forEach { id ->
+                val rename = client.patch("/api/v1/spaces/$id") { jsonBody(alice, SpaceDraft("Renamed")) }
+                assertEquals(HttpStatusCode.OK, rename.status, id)
+                assertEquals(HttpStatusCode.OK, client.get("/api/v1/spaces/$id/members") { bearerAuth(alice) }.status)
+            }
+            client.post("/api/v1/spaces") { jsonBody(alice, SpaceDraft("Four")) }.assertQuotaExceeded("spaces")
+            assertEquals(3, ownedSharedSpacesOf(client.userId(alice)))
+        }
+    }
+
+    @Test
+    fun concurrentCreatesCannotBothPass() = assertNoDeadlock {
+        withApp(testConfig().copy(maxSpacesPerUser = 1)) { client ->
+            client.userId(alice)
+            // The first create stops at its insert, the second at the user row the first locked; without the
+            // lock both would count zero spaces and stop at the insert.
+            val responses = InsertGate("spaces").use { gate ->
+                coroutineScope {
+                    val creates = List(2) {
+                        async { client.post("/api/v1/spaces") { jsonBody(alice, SpaceDraft("Trip")) } }
+                    }
+                    gate.awaitWaiting(2)
+                    gate.close()
+                    creates.awaitAll()
+                }
+            }
+            assertEquals(
+                listOf(HttpStatusCode.Created, HttpStatusCode.Conflict),
+                responses.map { it.status }.sortedBy { it.value },
+            )
+            responses.single { it.status == HttpStatusCode.Conflict }.assertQuotaExceeded("spaces")
+            assertEquals(1, ownedSharedSpacesOf(client.userId(alice)))
+        }
     }
 }

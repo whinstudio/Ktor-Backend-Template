@@ -183,6 +183,8 @@ private fun JsonObjectBuilder.errorSchema() {
         put("requestId", string())
         put("fields", arrayOf(field))
         put("minVersion", string(description = "Only on 426 CLIENT_UPGRADE_REQUIRED"))
+        // cmpose:sharing-off: put("quota", string(description = "Only on 409 QUOTA_EXCEEDED: storage"))
+        put("quota", string(description = "Only on 409 QUOTA_EXCEEDED: storage, spaces, members or invites"))
     }
     put("Error", objectOf(listOf("error")) { put("error", detail) })
 }
@@ -266,9 +268,20 @@ private fun JsonObjectBuilder.sharingPaths() {
     }
     putJsonObject("/spaces/{id}/invites") {
         put("parameters", pathParameters("Id"))
+        put("get", operation("The space's valid invites, newest first, at most 200; never their tokens (OWNER)") {
+            returns(OK, "The pending invites", arrayOf(schema("PendingInvite")))
+            fails(Unauthorized, NotFound, TooManyRequests)
+        })
         put("post", operation("Creates a single-use invite link (OWNER)", jsonBody(schema("InviteRequest"))) {
             returns(Created, "The invite; its token is shown only here", schema("Invite"))
             fails(BadRequest, Unauthorized, NotFound, TooManyRequests)
+        })
+    }
+    putJsonObject("/spaces/{id}/invites/{inviteId}") {
+        put("parameters", pathParameters("Id", "InviteId"))
+        put("delete", operation("Revokes an invite (OWNER); a used one is 409 INVITE_USED") {
+            returns(NoContent, "Revoked (also when called again, or when it had expired)")
+            fails(Unauthorized, NotFound, Conflict, TooManyRequests)
         })
     }
     putJsonObject("/invites/preview") {
@@ -278,7 +291,8 @@ private fun JsonObjectBuilder.sharingPaths() {
         })
     }
     putJsonObject("/invites/accept") {
-        val summary = "Joins the invite's space; a used invite is 409 INVITE_USED, an expired one 410 INVITE_EXPIRED"
+        val summary = "Joins the invite's space; a used invite is 409 INVITE_USED, a revoked one 410 INVITE_REVOKED, " +
+            "an expired one 410 INVITE_EXPIRED"
         put("post", operation(summary, jsonBody(schema("InviteToken"))) {
             returns(OK, "The joined space", schema("Space"))
             fails(BadRequest, Unauthorized, NotFound, Conflict, Gone, TooManyRequests)
@@ -314,14 +328,21 @@ private fun JsonObjectBuilder.sharingSchemas() {
     })
     put("RoleChange", objectOf(listOf("role"), closed = true) { put("role", schema("Role")) })
     put("InviteRequest", objectOf(listOf("role"), closed = true) { put("role", schema("Role")) })
-    put("Invite", objectOf(listOf("token", "expiresAt")) {
+    put("Invite", objectOf(listOf("id", "token", "expiresAt")) {
+        put("id", uuid())
         put("token", string())
+        put("expiresAt", int64())
+    })
+    put("PendingInvite", objectOf(listOf("id", "role", "createdAt", "expiresAt")) {
+        put("id", uuid())
+        put("role", schema("Role"))
+        put("createdAt", int64())
         put("expiresAt", int64())
     })
     put("InviteToken", objectOf(listOf("token"), closed = true) { put("token", string()) })
     put("InviteState", buildJsonObject {
         put("type", "string")
-        putJsonArray("enum") { listOf("valid", "used", "expired").forEach(::add) }
+        putJsonArray("enum") { listOf("valid", "used", "expired", "revoked").forEach(::add) }
     })
     put("InvitePreview", objectOf(listOf("spaceName", "inviterName", "role", "expiresAt", "state")) {
         put("spaceName", string())
@@ -342,7 +363,8 @@ private fun JsonObjectBuilder.components() {
         }
     }
     putJsonObject("parameters") {
-        listOf("Id" to "id", "UserId" to "userId").forEach { (name, parameter) ->
+        // cmpose:sharing-off: listOf("Id" to "id", "UserId" to "userId").forEach { (name, parameter) ->
+        listOf("Id" to "id", "UserId" to "userId", "InviteId" to "inviteId").forEach { (name, parameter) ->
             putJsonObject(name) {
                 put("name", parameter)
                 put("in", "path")
