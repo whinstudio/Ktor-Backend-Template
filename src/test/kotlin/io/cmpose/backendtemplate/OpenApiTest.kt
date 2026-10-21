@@ -48,6 +48,10 @@ class OpenApiTest {
         val limit = paths["/items"]!!.jsonObject["get"]!!.jsonObject["parameters"]!!.jsonArray
             .map { it.jsonObject }.single { it["name"]!!.jsonPrimitive.content == "limit" }
         assertEquals(JsonPrimitive(200), limit["schema"]!!.jsonObject["maximum"])
+        val recent = paths["/items/recent"]!!.jsonObject["get"]!!.jsonObject["responses"]!!.jsonObject["200"]!!
+        val schema = recent.jsonObject["content"]!!.jsonObject["application/json"]!!.jsonObject["schema"]!!.jsonObject
+        assertEquals(JsonPrimitive("array"), schema["type"])
+        assertEquals(JsonPrimitive(20), schema["maxItems"])
     }
     // /cmpose:sample
 
@@ -79,7 +83,7 @@ class OpenApiTest {
         val expected = buildSet {
             addAll(listOf("/me", "/me/profile", "/files", "/files/{id}"))
             // cmpose:sample
-            addAll(listOf("/items", "/items/{id}"))
+            addAll(listOf("/items", "/items/recent", "/items/{id}"))
             // /cmpose:sample
             // cmpose:sharing
             addAll(listOf("/spaces", "/spaces/{id}", "/spaces/{id}/members", "/spaces/{id}/members/{userId}"))

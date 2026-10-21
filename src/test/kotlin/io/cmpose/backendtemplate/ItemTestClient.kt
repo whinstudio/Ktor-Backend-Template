@@ -37,6 +37,16 @@ suspend fun HttpClient.itemPage(token: String, query: String = ""): ItemPage {
     return response.body()
 }
 
+/** `GET /api/v1/items/recent` with [query] appended as is. */
+suspend fun HttpClient.listRecentItems(token: String, query: String = ""): HttpResponse =
+    get("/api/v1/items/recent" + if (query.isEmpty()) "" else "?$query") { bearerAuth(token) }
+
+suspend fun HttpClient.recentItems(token: String, query: String = ""): List<ItemResponse> {
+    val response = listRecentItems(token, query)
+    assertEquals(HttpStatusCode.OK, response.status)
+    return response.body()
+}
+
 suspend fun HttpClient.getItem(token: String, id: String): HttpResponse =
     get("/api/v1/items/$id") { bearerAuth(token) }
 
