@@ -267,22 +267,25 @@ class FileRoutesTest {
     }
 
     @Test
-    fun concurrentUploadsCannotBothPassTheQuota() = testApplication {
-        val store = PairedStore(LocalDiskFileStore(dir))
-        val config = testConfig().copy(filesDir = dir.toString(), maxStorageBytesPerUser = 1000)
-        application { module(AppDeps(config, TestKeys.jwkProvider, TestDb.database, store)) }
-        val client = jsonClient()
-        assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status)
-        // Either 300 alone fits (900); both together (1200) do not. The store releases them into the check together.
-        store.paired = true
-        val responses = coroutineScope {
-            awaitAll(async { client.upload(alice, pngOf(300)) }, async { client.upload(alice, pngOf(300)) })
+    fun concurrentUploadsCannotBothPassTheQuota() = assertNoDeadlock {
+        withApp(maxStorageBytesPerUser = 1000) { client ->
+            assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status)
+            // Either 300 alone fits (900); both together (1200) do not. One upload stops at its insert with the user
+            // row locked, the other at that row; without the lock both would count 600 and stop at the insert.
+            val responses = InsertGate("files").use { gate ->
+                coroutineScope {
+                    val uploads = List(2) { async { client.upload(alice, pngOf(300)) } }
+                    gate.awaitWaiting(2)
+                    gate.close()
+                    uploads.awaitAll()
+                }
+            }
+            assertEquals(
+                listOf(HttpStatusCode.Created, HttpStatusCode.Conflict),
+                responses.map { it.status }.sortedBy { it.value },
+            )
+            assertQuotaExceeded(responses.single { it.status == HttpStatusCode.Conflict })
         }
-        assertEquals(
-            listOf(HttpStatusCode.Created, HttpStatusCode.Conflict),
-            responses.map { it.status }.sortedBy { it.value },
-        )
-        assertQuotaExceeded(responses.single { it.status == HttpStatusCode.Conflict })
         assertEquals(2L, rowCount())
         assertEquals(2, dir.listDirectoryEntries().size)
     }
@@ -385,6 +388,7 @@ class FileRoutesTest {
         }
     }
 
+    // cmpose:sharing
     /** Once [paired] is set, holds each write until a second one arrives, so the two reach the database together. */
     private class PairedStore(private val inner: FileStore) : FileStore by inner {
         @Volatile var paired = false
@@ -398,6 +402,7 @@ class FileRoutesTest {
             return inner.write(bytes)
         }
     }
+    // /cmpose:sharing
 
     /** A body sent without `Content-Length`, so only the limit counting while reading can catch it. */
     private class Chunked(private val bytes: ByteArray, override val contentType: ContentType) :

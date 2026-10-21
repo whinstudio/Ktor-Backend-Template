@@ -189,6 +189,23 @@ class SpaceRoutesTest {
     }
 
     @Test
+    fun loweredSpaceQuotaKeepsSpaces() {
+        val ids = mutableListOf<String>()
+        withApp { client -> listOf("One", "Two", "Three").forEach { ids += client.createSpace(alice, it).id } }
+        withApp(testConfig().copy(maxSpacesPerUser = 2)) { client ->
+            // Three spaces under a quota of two: all stay listed and usable; only a new one is refused.
+            assertEquals(ids.toSet(), client.spaces(alice).filter { !it.personal }.map { it.id }.toSet())
+            ids.forEach { id ->
+                val rename = client.patch("/api/v1/spaces/$id") { jsonBody(alice, SpaceDraft("Renamed")) }
+                assertEquals(HttpStatusCode.OK, rename.status, id)
+                assertEquals(HttpStatusCode.OK, client.get("/api/v1/spaces/$id/members") { bearerAuth(alice) }.status)
+            }
+            client.post("/api/v1/spaces") { jsonBody(alice, SpaceDraft("Four")) }.assertQuotaExceeded("spaces")
+            assertEquals(3, ownedSharedSpacesOf(client.userId(alice)))
+        }
+    }
+
+    @Test
     fun concurrentCreatesCannotBothPass() = assertNoDeadlock {
         withApp(testConfig().copy(maxSpacesPerUser = 1)) { client ->
             client.userId(alice)

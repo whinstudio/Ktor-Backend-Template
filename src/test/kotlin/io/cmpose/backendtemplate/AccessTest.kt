@@ -65,6 +65,10 @@ class AccessTest {
         }
     }
 
+    /** The ids of [spaceId]'s pending invites, as its owner [token] lists them. */
+    private suspend fun HttpClient.pendingIds(token: String, spaceId: String) =
+        pendingInvites(token, spaceId).body<List<PendingInvite>>().map { it.id }
+
     @Test
     fun nonMemberGets404Everywhere() = withApp { client ->
         val space = client.createSpace(alice, "Trip")
@@ -76,6 +80,7 @@ class AccessTest {
             "upload" to { client.upload(bob, spaceId = space.id) },
         )
         assertAllNotFound(ownerCalls(client, space.id, aliceId, inviteId, bob) + readCalls)
+        assertEquals(listOf(inviteId), client.pendingIds(alice, space.id))
         assertFalse(client.spaces(bob).any { it.id == space.id })
         assertEquals(listOf("Trip"), client.spaces(alice).filter { !it.personal }.map { it.name })
     }
@@ -87,6 +92,7 @@ class AccessTest {
         val inviteId = client.invite(alice, space.id, Role.VIEWER).id
         val calls = ownerCalls(client, space.id, carolId, inviteId, bob)
         assertAllNotFound(calls + ("upload" to { client.upload(bob, spaceId = space.id) }))
+        assertEquals(listOf(inviteId), client.pendingIds(alice, space.id))
         assertEquals(HttpStatusCode.OK, client.get("/api/v1/spaces/${space.id}/members") { bearerAuth(bob) }.status)
         assertEquals("Trip", client.spaces(alice).single { it.id == space.id }.name)
     }
@@ -97,8 +103,7 @@ class AccessTest {
         val carolId = client.userId(carol)
         val inviteId = client.invite(alice, space.id, Role.VIEWER).id
         assertAllNotFound(ownerCalls(client, space.id, carolId, inviteId, bob))
-        val pending = client.pendingInvites(alice, space.id).body<List<PendingInvite>>()
-        assertEquals(listOf(inviteId), pending.map { it.id })
+        assertEquals(listOf(inviteId), client.pendingIds(alice, space.id))
         assertEquals(Role.VIEWER, client.spaces(carol).single { it.id == space.id }.role)
         assertEquals(HttpStatusCode.Created, client.upload(bob, spaceId = space.id).status)
     }
