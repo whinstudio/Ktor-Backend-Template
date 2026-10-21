@@ -11,6 +11,7 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
@@ -91,10 +92,42 @@ class ItemRoutesTest {
     }
 
     @Test
+    fun recentIsTheNewestTwentyInThePagedOrder() = withApp { client ->
+        repeat(23) { client.createItem(alice, ItemDraft("Item $it")) }
+        val recent = client.recentItems(alice)
+        assertEquals(20, recent.size)
+        assertEquals(client.itemPage(alice, "limit=20").items, recent)
+    }
+
+    @Test
+    fun recentReturnsAllOfAShortList() = withApp { client ->
+        repeat(3) { client.createItem(alice, ItemDraft("Item $it")) }
+        // An unknown query parameter is ignored.
+        assertEquals(client.itemPage(alice).items, client.recentItems(alice, "limit=1"))
+    }
+
+    @Test
+    fun recentOfNothingIsAnEmptyArray() = withApp { client ->
+        val response = client.listRecentItems(alice)
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("[]", response.bodyAsText())
+    }
+
+    @Test
+    fun recentIsNotAnItemId() = withApp { client ->
+        val item = client.createItem(alice)
+        assertEquals(listOf(item), client.recentItems(alice))
+        assertEquals(HttpStatusCode.NotFound, client.patchItem(alice, "recent", "{}").status)
+        assertEquals(HttpStatusCode.NotFound, client.deleteItem(alice, "recent").status)
+        assertEquals(1L, rowCount())
+    }
+
+    @Test
     fun everyRouteNeedsAToken() = withApp { client ->
         val id = client.createItem(alice).id
         listOf(
             client.get("/api/v1/items"),
+            client.get("/api/v1/items/recent"),
             client.post("/api/v1/items"),
             client.get("/api/v1/items/$id"),
             client.patch("/api/v1/items/$id"),
@@ -112,6 +145,7 @@ class ItemRoutesTest {
         assertEquals(HttpStatusCode.NoContent, client.delete("/api/v1/me") { bearerAuth(alice) }.status)
         assertEquals(1L, rowCount())
         assertEquals(1, client.itemPage(bob).items.size)
+        assertEquals(1, client.recentItems(bob).size)
     }
 
     // cmpose:sharing
@@ -129,6 +163,9 @@ class ItemRoutesTest {
         assertEquals(listOf(personal), client.itemPage(alice).items)
         assertEquals(listOf(shared), client.itemPage(alice, "spaceId=${space.id}").items)
         assertTrue(client.itemPage(carol).items.isEmpty())
+        assertEquals(listOf(shared), client.recentItems(bob, "spaceId=${space.id}"))
+        assertEquals(listOf(personal), client.recentItems(alice))
+        assertTrue(client.recentItems(carol).isEmpty())
 
         val renamed = client.patchItem(carol, shared.id, """{"title":"Big tent"}""")
         assertEquals(HttpStatusCode.OK, renamed.status)

@@ -20,8 +20,9 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
 <!-- /cmpose:sharing -->
 1. A row the caller may not see answers 404 `NOT_FOUND`, exactly like a missing row: never 403, never another message.
    A path id that is not a UUID is a 404 too.
-1. Lists page with `limit` (1..200) and an opaque cursor; never return an unbounded list. The owner filter applies to
-   every page: a cursor is only a position.
+1. A list that can grow pages with `limit` (1..200) and an opaque cursor; a small list with a fixed upper bound may
+   return in one response. Never return an unbounded list. The owner filter applies to every page: a cursor is only a
+   position.
 
 ## Input
 

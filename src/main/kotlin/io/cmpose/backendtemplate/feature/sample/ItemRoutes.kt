@@ -26,6 +26,9 @@ import java.util.UUID
 private const val DEFAULT_LIMIT = 50
 private const val MAX_LIMIT = 200
 
+/** How many items `GET /api/v1/items/recent` returns at most; the API description states it too. */
+internal const val RECENT_LIMIT = 20
+
 /** The `{id}` path parameter as an item id; anything but a UUID names no item (404). */
 private fun ApplicationCall.itemId(): UUID =
     runCatching { UUID.fromString(parameters["id"].orEmpty()) }.getOrNull() ?: notFound()
@@ -65,7 +68,7 @@ private suspend fun ApplicationCall.requireItem(items: ItemRepository, spaces: S
 /**
  * The sample feature: CRUD on `/api/v1/items`, the pattern to copy for a new record type. Every handler calls
  * `requireUser()` first; an item the caller may not see is a 404, the same as a missing one. The list pages newest
- * first with `limit` (1..200, default 50) and an opaque `cursor`.
+ * first with `limit` (1..200, default 50) and an opaque `cursor`; `/recent` is the newest [RECENT_LIMIT] in one array.
  */
 fun Route.itemRoutes(
     items: ItemRepository,
@@ -76,6 +79,8 @@ fun Route.itemRoutes(
     // cmpose:sharing-off: // Each item belongs to the user who created it; every query filters on the caller.
     // Items live in a space (the `spaceId` query or field, else the personal space): VIEWER reads, EDITOR writes.
     route("/api/v1/items") {
+        // Two list shapes to copy: a list that can grow answers a page at a time (`limit`, `cursor`, `nextCursor`);
+        // a small list with a fixed upper bound answers in one plain array (`/recent`). Never an unbounded list.
         get {
             val user = call.requireUser()
             val (limit, after) = call.page()
@@ -89,6 +94,17 @@ fun Route.itemRoutes(
             val page = rows.take(limit)
             val next = if (rows.size > limit) page.last().cursor().encode() else null
             call.respond(ItemPage(page.map { it.toResponse() }, next))
+        }
+        // A fixed path segment wins over `/{id}`, so `recent` is never read as an item id.
+        get("/recent") {
+            val user = call.requireUser()
+            // cmpose:sharing
+            val spaceId = call.request.queryParameters["spaceId"] ?: spaces.personalSpace(user).toString()
+            val membership = call.requireRole(spaces, spaceId, Role.VIEWER)
+            // /cmpose:sharing
+            // cmpose:sharing-off: val recent = items.list(user, RECENT_LIMIT, after = null)
+            val recent = items.list(membership.spaceId, RECENT_LIMIT, after = null)
+            call.respond(recent.map { it.toResponse() })
         }
         post {
             val user = call.requireUser()

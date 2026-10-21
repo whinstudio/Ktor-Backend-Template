@@ -22,7 +22,7 @@ One sample feature shows the shape to copy.
 | `src/main/kotlin/.../auth`, `users` | token verification, `requireUser()`, `GET` and `DELETE /api/v1/me`, the profile (`PUT /api/v1/me/profile`: display name) |
 | `src/main/kotlin/.../files` | uploads (type read from the bytes) and downloads |
 <!-- cmpose:sample -->
-| `src/main/kotlin/.../feature/sample` | the sample feature (`/api/v1/items`): the shape to copy |
+| `src/main/kotlin/.../feature/sample` | the sample feature (`/api/v1/items`, paged; `/api/v1/items/recent`, one response): the shape to copy |
 <!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
 | `src/main/kotlin/.../sharing` | spaces, roles and invitations |
@@ -93,7 +93,11 @@ and the tests.
 <!-- cmpose:sharing -->
   With sharing, a non-member of a space and a member whose role is too low both get 404.
 <!-- /cmpose:sharing -->
-- Lists page with `limit` and an opaque `cursor`; the response's `nextCursor` is `null` on the last page.
+- A list that can grow pages with `limit` and an opaque `cursor`; the response's `nextCursor` is `null` on the last
+  page. A small list with a fixed upper bound may answer in one response. No list is unbounded.
+<!-- cmpose:sample -->
+  The sample feature has both: `GET /api/v1/items` pages, `GET /api/v1/items/recent` returns the newest 20 as one array.
+<!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
 - Invites: an OWNER lists a space's valid invites with `GET /api/v1/spaces/{id}/invites` (newest first, at most 200,
   not paged; `id`, `role`, `createdAt`, `expiresAt`, never the token) and revokes one with
@@ -113,7 +117,9 @@ invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWOR
 
 <!-- cmpose:sample -->
 Start a plain record type from the sample feature: `feature/sample` (table, repository, routes, DTOs), its migration
-`V3__sample.sql` and its tests. For any other feature:
+`V3__sample.sql` and its tests. It shows both list shapes: `GET /api/v1/items` pages (copy it for a list that can
+grow), `GET /api/v1/items/recent` answers its newest 20 in one array (for a small list with a fixed bound). For any
+other feature:
 <!-- /cmpose:sample -->
 Copy the shape of `files/` (repository, routes, migration, tests) and go through
 [SECURITY-CHECKLIST.md](SECURITY-CHECKLIST.md).

@@ -39,6 +39,9 @@ private fun queryParameter(name: String, schema: JsonObject, description: String
 }
 
 internal fun JsonObjectBuilder.itemPaths() {
+    // cmpose:sharing
+    val space = queryParameter("spaceId", uuid(), "The space to list; else the personal space (VIEWER or above)")
+    // /cmpose:sharing
     val listParameters = buildJsonArray {
         add(queryParameter("limit", buildJsonObject {
             put("type", "integer")
@@ -48,7 +51,7 @@ internal fun JsonObjectBuilder.itemPaths() {
         }))
         add(queryParameter("cursor", string(), "The nextCursor of the previous page"))
         // cmpose:sharing
-        add(queryParameter("spaceId", uuid(), "The space to list; else the personal space (VIEWER or above)"))
+        add(space)
         // /cmpose:sharing
     }
     putJsonObject("/items") {
@@ -62,6 +65,23 @@ internal fun JsonObjectBuilder.itemPaths() {
         put("post", operation("Creates an item", jsonBody(schema("ItemDraft"))) {
             returns(Created, "Created", schema("Item"))
             fails(BadRequest, Unauthorized)
+            // cmpose:sharing
+            fails(NotFound)
+            // /cmpose:sharing
+        })
+    }
+    putJsonObject("/items/recent") {
+        // cmpose:sharing
+        put("parameters", buildJsonArray { add(space) })
+        // /cmpose:sharing
+        val recent = buildJsonObject {
+            put("type", "array")
+            put("maxItems", RECENT_LIMIT)
+            put("items", schema("Item"))
+        }
+        put("get", operation("Lists the newest items, at most $RECENT_LIMIT, in one response (not paged)") {
+            returns(OK, "The newest items, newest first", recent)
+            fails(Unauthorized)
             // cmpose:sharing
             fails(NotFound)
             // /cmpose:sharing

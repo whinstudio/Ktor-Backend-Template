@@ -10,9 +10,11 @@ import io.cmpose.backendtemplate.getItem
 import io.cmpose.backendtemplate.itemPage
 import io.cmpose.backendtemplate.jsonClient
 import io.cmpose.backendtemplate.listItems
+import io.cmpose.backendtemplate.listRecentItems
 import io.cmpose.backendtemplate.module
 import io.cmpose.backendtemplate.patchItem
 import io.cmpose.backendtemplate.postItem
+import io.cmpose.backendtemplate.recentItems
 import io.cmpose.backendtemplate.sharedSpace
 import io.cmpose.backendtemplate.sharing.Role
 import io.ktor.client.HttpClient
@@ -58,6 +60,7 @@ class ItemIdorTest {
         assertHidden(client.deleteItem(bob, item.id))
         client.assertUnchanged(alice, item)
         assertTrue(client.itemPage(bob).items.isEmpty())
+        assertTrue(client.recentItems(bob).isEmpty())
     }
 
     @Test
@@ -109,6 +112,8 @@ class ItemIdorTest {
         assertHidden(client.listItems(carol, "spaceId=${trip.id}"))
         assertHidden(client.postItem(carol, ItemDraft("Mine", spaceId = trip.id)))
         assertHidden(client.listItems(carol, "spaceId=not-a-uuid"))
+        assertHidden(client.listRecentItems(carol, "spaceId=${trip.id}"))
+        assertHidden(client.listRecentItems(carol, "spaceId=not-a-uuid"))
         client.assertUnchanged(alice, item)
     }
     // /cmpose:sharing
