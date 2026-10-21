@@ -45,14 +45,14 @@ internal fun rejectToken(reason: String): Nothing? {
  * non-empty `sub`. No Admin SDK, no service account. Every refusal is logged at WARN as "Token rejected: <reason>", so
  * a 401 on a device can be explained from the log.
  *
- * A `kid` that has never resolved may reach Google at most once per [UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS] (one global
- * slot, not one per kid); any other is refused as "unknown kid" without a lookup. So a flood of made-up kids cannot
- * spend the provider's fetch budget, and real users keep getting their keys instead of a 503. A lookup that finds the
- * key frees the slot again, so new real kids (a cold start, a key rotation) resolve back to back. With
+ * A `kid` not yet seen in Google's key set may reach Google at most once per [UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS] (one
+ * global slot, not one per kid); any other is refused as "unknown kid" without a lookup. So a flood of made-up kids
+ * cannot spend the provider's fetch budget, and real users keep getting their keys instead of a 503. A lookup that
+ * finds the key frees the slot again, so new real kids (a cold start, a key rotation) resolve back to back. With
  * [publishedKeyIds] that lookup fetches Google's whole key set and learns every kid in it, so a flood's one fetch per
  * interval also learns a newly published real key (Google publishes a key before it signs with it): a real kid is not
- * refused during a flood. Without it only the token's own kid is looked up, and during a flood a new real kid may be
- * refused for up to one interval.
+ * refused during a flood (except while that one fetch is in flight). Without it only the token's own kid is looked up,
+ * and during a flood a new real kid may be refused for up to one interval.
  */
 class FirebaseTokenVerifier(
     private val jwks: JwkProvider,
@@ -119,7 +119,7 @@ class FirebaseTokenVerifier(
     // A known kid that no longer resolves is dropped, so it goes through the slot again.
     private fun knownKey(keyId: String): RSAPublicKey? = lookUp(keyId) ?: null.also { knownKeyIds -= keyId }
 
-    // Holds the slot taken at [at]; gives it back on a failed fetch, frees it when [keyId] is published.
+    // Holds the slot taken at [at]; gives it back on a failed fetch, frees it once [keyId]'s key resolves.
     private fun learnPublishedKeys(published: PublishedKeyIds, keyId: String, at: Long, previous: Long): RSAPublicKey? {
         val keyIds = try {
             published.fetch()
@@ -129,10 +129,16 @@ class FirebaseTokenVerifier(
             throw AuthUnavailableException(e)
         }
         knownKeyIds += keyIds
-        // The slot stays taken for a kid Google does not publish: that keeps a flood to one fetch per interval.
+        // The slot stays taken for a kid Google does not publish or that does not resolve: one fetch per interval.
         if (keyId !in keyIds) return rejectToken("unknown kid")
-        lastUnknownLookup.compareAndSet(at, previous)
-        return knownKey(keyId)
+        val key = try {
+            knownKey(keyId)
+        } catch (e: AuthUnavailableException) {
+            lastUnknownLookup.compareAndSet(at, previous)
+            throw e
+        }
+        if (key != null) lastUnknownLookup.compareAndSet(at, previous)
+        return key
     }
 
     // An unknown kid is the caller's problem (401); a key fetch that failed is ours (503).

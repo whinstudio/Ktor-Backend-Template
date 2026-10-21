@@ -19,16 +19,22 @@ private const val GOOGLE_JWKS =
 private const val JWKS_CACHE_SIZE = 10L
 private const val JWKS_CACHE_HOURS = 6L
 private const val JWKS_FETCHES_PER_MINUTE = 10L
+private const val JWKS_CONNECT_TIMEOUT_MILLIS = 3_000
+private const val JWKS_READ_TIMEOUT_MILLIS = 5_000
 
 /** Google's signing keys for Firebase ID tokens, cached and rate limited (also used by the local runner). */
 fun googleJwkProvider(): JwkProvider = JwkProviderBuilder(URI(GOOGLE_JWKS).toURL())
     .cached(JWKS_CACHE_SIZE, JWKS_CACHE_HOURS, TimeUnit.HOURS)
     .rateLimited(JWKS_FETCHES_PER_MINUTE, 1, TimeUnit.MINUTES)
+    .timeouts(JWKS_CONNECT_TIMEOUT_MILLIS, JWKS_READ_TIMEOUT_MILLIS)
     .build()
 
 /** Every kid in Google's key set, fetched uncached on each call (the verifier limits how often; also local runner). */
 fun googleKeyIds(): PublishedKeyIds = PublishedKeyIds {
-    UrlJwkProvider(URI(GOOGLE_JWKS).toURL()).all.mapNotNull { it.id }.toSet()
+    UrlJwkProvider(URI(GOOGLE_JWKS).toURL(), JWKS_CONNECT_TIMEOUT_MILLIS, JWKS_READ_TIMEOUT_MILLIS)
+        .all
+        .mapNotNull { it.id }
+        .toSet()
 }
 
 fun main() {

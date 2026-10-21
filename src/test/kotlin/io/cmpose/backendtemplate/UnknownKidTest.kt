@@ -124,7 +124,21 @@ class UnknownKidTest {
     @Test
     fun aListedKidTheProviderCannotResolveIsUnknown() = runBlocking {
         val keySet = CountingKeySet(setOf(TestKeys.KID, "ghost"))
-        val verifier = verifier(CountingProvider(), keySet) { 1_000_000L }
+        val jwks = CountingProvider()
+        val verifier = verifier(jwks, keySet) { 1_000_000L }
         assertNull(verifier.verify(TestKeys.token(kid = "ghost")))
+        assertNull(verifier.verify(TestKeys.token(kid = "ghost")))
+        assertEquals(1, keySet.fetches)
+        assertEquals(listOf("ghost"), jwks.asked.toList())
+    }
+
+    @Test
+    fun theAppLearnsANewRealKidDuringAFlood() = testApplication {
+        val keySet = CountingKeySet(setOf(TestKeys.KID, "rotated"))
+        val jwks = CountingProvider(setOf(TestKeys.KID, "rotated"))
+        application { module(AppDeps(testConfig(), jwks, TestDb.database, jwkKeyIds = keySet)) }
+        assertEquals(HttpStatusCode.Unauthorized, client.me(TestKeys.token(sub = "mallory", kid = "fake-1")).status)
+        assertEquals(HttpStatusCode.OK, client.me(TestKeys.token(sub = "alice", kid = "rotated")).status)
+        assertEquals(1, keySet.fetches)
     }
 }
