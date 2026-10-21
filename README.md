@@ -77,6 +77,14 @@ and the tests.
     problem; the logs carry it.
   - The app sends `X-Client-Version`. Below `MIN_CLIENT_VERSION` the answer is 426 `CLIENT_UPGRADE_REQUIRED` with
     `minVersion`; a malformed value is 400; no header passes.
+  - An app built before a server change may misread its new answers: one built before the quotas does not know
+    `QUOTA_EXCEEDED` and shows a general error instead of the quota message.
+<!-- cmpose:sharing -->
+    One built before invite revocation shows a `revoked` invite preview as an unknown error, takes
+    `QUOTA_EXCEEDED` on accepting an invite for "already used" (both are 409) and `INVITE_REVOKED` for "expired".
+<!-- /cmpose:sharing -->
+    After deploying such a server, raise `MIN_CLIENT_VERSION` to the first app release that knows the new answers,
+    so older apps are sent to update.
   - A rate-limited request gets 429 `RATE_LIMITED` with `Retry-After`.
 - A missing or invalid token is 401 `UNAUTHORIZED`. When Google's keys cannot be fetched and none is cached, the answer
   is 503 `AUTH_UNAVAILABLE`, so the app retries instead of signing out.
@@ -91,7 +99,8 @@ and the tests.
   not paged; `id`, `role`, `createdAt`, `expiresAt`, never the token) and revokes one with
   `DELETE /api/v1/spaces/{id}/invites/{inviteId}` (204, also when called again; 409 `INVITE_USED` once used; another
   space's invite or an id that is no UUID is 404). A revoked invite keeps previewing as `revoked`, even once it has
-  expired, and stops counting against `MAX_PENDING_INVITES_PER_SPACE`.
+  expired, and stops counting against `MAX_PENDING_INVITES_PER_SPACE`. The list counts against the global rate limit
+  only, as the members list does; the revoke, like creating, previewing and accepting, also against the sensitive one.
 <!-- /cmpose:sharing -->
 
 ## Configuration

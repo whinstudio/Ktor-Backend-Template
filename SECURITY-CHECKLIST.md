@@ -53,7 +53,8 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
    `INVITE_REVOKED`.
 1. An OWNER lists a space's pending invites (`GET /api/v1/spaces/{id}/invites`) and revokes one
    (`DELETE /api/v1/spaces/{id}/invites/{inviteId}`). The list never shows a token or its hash; the token is shown
-   once, when the invite is created. The revoke's log line names no invite, space or token.
+   once, when the invite is created. The revoke's log line names no invite, space or token. The revoke runs under
+   `rateLimit(SENSITIVE_LIMIT)`; the list is a read, like the members list, and only the global limit counts it.
 <!-- /cmpose:sharing -->
 1. Schema changes are new Flyway migrations (`V<n>__<name>.sql`); never edit one that has run anywhere.
 1. Responses are DTOs built for the client. Never serialize table rows or internal objects, and never return another
@@ -77,7 +78,10 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
 1. A change that must happen once (a payment, a counter, a single-use token) is idempotent and safe under races: check
    and change in one transaction with `SELECT … FOR UPDATE`, or in one conditional `UPDATE`.
 1. A new write path that adds to something a quota counts checks the quota in the same locked transaction as the
-   write (lock the parent row with `SELECT … FOR UPDATE`, count, then insert) and fails with `quotaExceeded(...)`.
+   write (lock the parent row with `SELECT … FOR NO KEY UPDATE`, Exposed's
+   `forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)`, count, then insert) and fails with `quotaExceeded(...)`.
+   A plain `FOR UPDATE` would block the key-share lock a foreign-key check takes on that row and can deadlock two
+   writes that point at each other's locked row.
 1. Nothing changes state on a GET. The API authenticates with bearer tokens, not cookies, so CSRF does not apply; a
    feature that adds cookie sign-in adds CSRF protection with it.
 
