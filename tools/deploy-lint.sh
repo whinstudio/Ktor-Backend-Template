@@ -43,6 +43,10 @@ done
 if [ -f "$dockerfile" ]; then
     has_re "$dockerfile" '^USER 10001$' "needs a 'USER 10001' line"
     lacks_re "$dockerfile" '^[[:space:]]*HEALTHCHECK' "must not have a HEALTHCHECK (compose owns it)"
+    # Base images pinned by digest; the tag stays for readers and for Dependabot, which moves both.
+    unpinned="$(grep -iE '^[[:space:]]*FROM[[:space:]]' "$dockerfile" \
+        | grep -viE '^FROM [^[:space:]@:]+:[^[:space:]@]+@sha256:[0-9a-f]{64}( AS [[:alnum:]_.-]+)?$' || true)"
+    [ -z "$unpinned" ] || fail "$dockerfile: every FROM pins its image by digest (<image>:<tag>@sha256:…)"
 fi
 
 has "$compose" "mem_limit: \${${prefix}_MEM_LIMIT:-512m}" "needs mem_limit: \${${prefix}_MEM_LIMIT:-512m}"

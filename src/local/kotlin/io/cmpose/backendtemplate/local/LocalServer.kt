@@ -2,6 +2,7 @@ package io.cmpose.backendtemplate.local
 
 import com.auth0.jwk.JwkProvider
 import io.cmpose.backendtemplate.AppDeps
+import io.cmpose.backendtemplate.auth.PublishedKeyIds
 import io.cmpose.backendtemplate.config.AppConfig
 import io.cmpose.backendtemplate.db.connectDatabase
 import io.cmpose.backendtemplate.module
@@ -52,19 +53,21 @@ class LocalServer private constructor(
         /**
          * Starts PostgreSQL, migrates it and serves on loopback. Every failure is a [LocalSetupException];
          * whatever had started by then (Ktor, PostgreSQL) is stopped first, so no process keeps the data folder.
+         * [keyIds] is Google's published key set (see `AppDeps.jwkKeyIds`); tests leave it out.
          */
         fun start(
             dir: File,
             settings: LocalSettings,
             jwks: JwkProvider,
-            out: (String) -> Unit
+            out: (String) -> Unit,
+            keyIds: PublishedKeyIds? = null
         ): LocalServer {
             if (!PortCheck.isFree(settings.port)) {
                 throw LocalSetupException("Port ${settings.port} is in use:\n${PortCheck.holder(settings.port)}")
             }
             val database = startDatabase(dir)
             return try {
-                serve(dir, settings, jwks, out, database)
+                serve(dir, settings, jwks, keyIds, out, database)
             } catch (e: Exception) {
                 database.close()
                 throw setupFailure("The local server did not start", e)
@@ -81,6 +84,7 @@ class LocalServer private constructor(
             dir: File,
             settings: LocalSettings,
             jwks: JwkProvider,
+            keyIds: PublishedKeyIds?,
             out: (String) -> Unit,
             database: LocalDatabase
         ): LocalServer {
@@ -89,7 +93,7 @@ class LocalServer private constructor(
             // Migrated before Ktor starts, so a Flyway failure never leaves a half-started engine behind.
             val db = connectDatabase(config)
             val engine = embeddedServer(Netty, port = settings.port, host = "127.0.0.1") {
-                module(AppDeps(config, jwks, db))
+                module(AppDeps(config, jwks, db, jwkKeyIds = keyIds))
             }
             try {
                 engine.start(wait = false)

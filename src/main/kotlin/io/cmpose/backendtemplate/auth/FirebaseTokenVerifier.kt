@@ -45,11 +45,14 @@ internal fun rejectToken(reason: String): Nothing? {
  * non-empty `sub`. No Admin SDK, no service account. Every refusal is logged at WARN as "Token rejected: <reason>", so
  * a 401 on a device can be explained from the log.
  *
- * A `kid` that has never resolved may reach [jwks] at most once per [UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS] (one global
- * slot, not one per kid); any other is refused as "unknown kid" without a lookup. So a flood of made-up kids cannot
- * spend the provider's fetch budget, and real users keep getting their keys instead of a 503. A lookup that finds the
- * key frees the slot again, so new real kids (a cold start, a key rotation) resolve back to back; only during such a
- * flood may a new real kid be refused for up to one interval.
+ * A `kid` not yet seen in Google's key set may reach Google at most once per [UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS] (one
+ * global slot, not one per kid); any other is refused as "unknown kid" without a lookup. So a flood of made-up kids
+ * cannot spend the provider's fetch budget, and real users keep getting their keys instead of a 503. A lookup that
+ * finds the key frees the slot again, so new real kids (a cold start, a key rotation) resolve back to back. With
+ * [publishedKeyIds] that lookup fetches Google's whole key set and learns every kid in it, so a flood's one fetch per
+ * interval also learns a newly published real key (Google publishes a key before it signs with it): a real kid is not
+ * refused during a flood (except while that one fetch is in flight). Without it only the token's own kid is looked up,
+ * and during a flood a new real kid may be refused for up to one interval.
  */
 class FirebaseTokenVerifier(
     private val jwks: JwkProvider,
@@ -57,6 +60,7 @@ class FirebaseTokenVerifier(
     private val leewaySeconds: Long,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val now: () -> Long = System::currentTimeMillis,
+    private val publishedKeyIds: PublishedKeyIds? = null,
 ) : TokenVerifier {
     // Only kids Google's key set really contains get in, so this stays as small as that set's history.
     private val knownKeyIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -93,11 +97,12 @@ class FirebaseTokenVerifier(
     }
 
     private fun publicKey(keyId: String): RSAPublicKey? {
-        if (keyId in knownKeyIds) return lookUp(keyId) ?: null.also { knownKeyIds -= keyId }
+        if (keyId in knownKeyIds) return knownKey(keyId)
         val previous = lastUnknownLookup.get()
         val at = now()
         val slotFree = at - previous >= UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS
         if (!slotFree || !lastUnknownLookup.compareAndSet(previous, at)) return rejectToken("unknown kid")
+        if (publishedKeyIds != null) return learnPublishedKeys(publishedKeyIds, keyId, at, previous)
         val key = try {
             lookUp(keyId)
         } catch (e: AuthUnavailableException) {
@@ -108,6 +113,31 @@ class FirebaseTokenVerifier(
             knownKeyIds += keyId
             lastUnknownLookup.compareAndSet(at, previous)
         }
+        return key
+    }
+
+    // A known kid that no longer resolves is dropped, so it goes through the slot again.
+    private fun knownKey(keyId: String): RSAPublicKey? = lookUp(keyId) ?: null.also { knownKeyIds -= keyId }
+
+    // Holds the slot taken at [at]; gives it back on a failed fetch, frees it once [keyId]'s key resolves.
+    private fun learnPublishedKeys(published: PublishedKeyIds, keyId: String, at: Long, previous: Long): RSAPublicKey? {
+        val keyIds = try {
+            published.fetch()
+        } catch (e: JwkException) {
+            authLog.warn("Token not checked: JWKS unavailable")
+            lastUnknownLookup.compareAndSet(at, previous)
+            throw AuthUnavailableException(e)
+        }
+        knownKeyIds += keyIds
+        // The slot stays taken for a kid Google does not publish or that does not resolve: one fetch per interval.
+        if (keyId !in keyIds) return rejectToken("unknown kid")
+        val key = try {
+            knownKey(keyId)
+        } catch (e: AuthUnavailableException) {
+            lastUnknownLookup.compareAndSet(at, previous)
+            throw e
+        }
+        if (key != null) lastUnknownLookup.compareAndSet(at, previous)
         return key
     }
 

@@ -1,7 +1,7 @@
 # Build from the repository root: docker build -f deploy/Dockerfile --build-arg APP_VERSION=<tag or sha> .
 # No HEALTHCHECK here: the compose file probes /ready.
 
-FROM gradle:8-jdk21 AS build
+FROM gradle:8-jdk21@sha256:c71fc6625c18e889654adeb86c99974028bc888505f6e1fd7eccad057174877d AS build
 WORKDIR /src
 # The wrapper and build scripts first, so the dependency layer is cached until they change.
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties detekt.yml ./
@@ -10,7 +10,7 @@ RUN ./gradlew --no-daemon --quiet dependencies --configuration runtimeClasspath 
 COPY src ./src
 RUN ./gradlew --no-daemon shadowJar
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75"

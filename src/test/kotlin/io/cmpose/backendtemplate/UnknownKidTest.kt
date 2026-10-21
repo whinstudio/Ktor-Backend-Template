@@ -2,8 +2,11 @@ package io.cmpose.backendtemplate
 
 import com.auth0.jwk.Jwk
 import com.auth0.jwk.JwkProvider
+import com.auth0.jwk.NetworkException
 import com.auth0.jwk.SigningKeyNotFoundException
+import io.cmpose.backendtemplate.auth.AuthUnavailableException
 import io.cmpose.backendtemplate.auth.FirebaseTokenVerifier
+import io.cmpose.backendtemplate.auth.PublishedKeyIds
 import io.cmpose.backendtemplate.auth.UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
@@ -13,8 +16,10 @@ import java.util.Collections
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Made-up kids cannot spend the key provider's fetch budget: one lookup of an unknown kid per interval, globally. */
 class UnknownKidTest {
@@ -34,8 +39,20 @@ class UnknownKidTest {
         }
     }
 
-    private fun verifier(jwks: JwkProvider, clock: () -> Long) =
-        FirebaseTokenVerifier(jwks, TestKeys.PROJECT_ID, 60, Dispatchers.Unconfined, clock)
+    /** Google's published kids for [CountingProvider]: counts its fetches and fails while [fail] is set. */
+    private class CountingKeySet(private val kids: Set<String>) : PublishedKeyIds {
+        @Volatile var fetches = 0
+        @Volatile var fail = false
+
+        override fun fetch(): Set<String> {
+            fetches++
+            if (fail) throw NetworkException("down", null)
+            return kids
+        }
+    }
+
+    private fun verifier(jwks: JwkProvider, keySet: PublishedKeyIds? = null, clock: () -> Long) =
+        FirebaseTokenVerifier(jwks, TestKeys.PROJECT_ID, 60, Dispatchers.Unconfined, clock, keySet)
 
     @Test
     fun floodOfMadeUpKidsLooksUpOnceAndRealUsersStillGet200() = testApplication {
@@ -72,5 +89,56 @@ class UnknownKidTest {
         assertNotNull(verifier.verify(TestKeys.token(kid = "rotated")))
         assertNotNull(verifier.verify(TestKeys.token()))
         assertEquals(listOf(TestKeys.KID, "rotated", TestKeys.KID), jwks.asked.toList())
+    }
+
+    @Test
+    fun aNewRealKidResolvesDuringAFlood() = runBlocking {
+        val jwks = CountingProvider(setOf(TestKeys.KID, "rotated"))
+        val keySet = CountingKeySet(setOf(TestKeys.KID, "rotated"))
+        val verifier = verifier(jwks, keySet) { 1_000_000L }
+        assertNull(verifier.verify(TestKeys.token(kid = "fake-1")))
+        assertNotNull(verifier.verify(TestKeys.token(kid = "rotated")))
+        assertEquals(1, keySet.fetches)
+    }
+
+    @Test
+    fun aFloodFetchesTheKeySetOncePerInterval() = runBlocking {
+        val jwks = CountingProvider()
+        val keySet = CountingKeySet(setOf(TestKeys.KID))
+        val verifier = verifier(jwks, keySet) { 1_000_000L }
+        repeat(20) { i -> assertNull(verifier.verify(TestKeys.token(kid = "fake-$i"))) }
+        assertEquals(1, keySet.fetches)
+        assertTrue(jwks.asked.none { it.startsWith("fake-") }, "${jwks.asked}")
+    }
+
+    @Test
+    fun aKeySetFetchFailureIs503AndGivesTheSlotBack() = runBlocking {
+        val keySet = CountingKeySet(setOf(TestKeys.KID)).apply { fail = true }
+        val verifier = verifier(CountingProvider(), keySet) { 1_000_000L }
+        assertFailsWith<AuthUnavailableException> { verifier.verify(TestKeys.token(kid = "fake-1")) }
+        keySet.fail = false
+        assertNull(verifier.verify(TestKeys.token(kid = "fake-2")))
+        assertEquals(2, keySet.fetches)
+    }
+
+    @Test
+    fun aListedKidTheProviderCannotResolveIsUnknown() = runBlocking {
+        val keySet = CountingKeySet(setOf(TestKeys.KID, "ghost"))
+        val jwks = CountingProvider()
+        val verifier = verifier(jwks, keySet) { 1_000_000L }
+        assertNull(verifier.verify(TestKeys.token(kid = "ghost")))
+        assertNull(verifier.verify(TestKeys.token(kid = "ghost")))
+        assertEquals(1, keySet.fetches)
+        assertEquals(listOf("ghost"), jwks.asked.toList())
+    }
+
+    @Test
+    fun theAppLearnsANewRealKidDuringAFlood() = testApplication {
+        val keySet = CountingKeySet(setOf(TestKeys.KID, "rotated"))
+        val jwks = CountingProvider(setOf(TestKeys.KID, "rotated"))
+        application { module(AppDeps(testConfig(), jwks, TestDb.database, jwkKeyIds = keySet)) }
+        assertEquals(HttpStatusCode.Unauthorized, client.me(TestKeys.token(sub = "mallory", kid = "fake-1")).status)
+        assertEquals(HttpStatusCode.OK, client.me(TestKeys.token(sub = "alice", kid = "rotated")).status)
+        assertEquals(1, keySet.fetches)
     }
 }

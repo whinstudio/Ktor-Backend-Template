@@ -11,6 +11,9 @@ that the server repository takes in; nothing shared is edited by hand to add an 
 | `sql/create-cmpose-app.sql` | copied to the server and run once (step 1), then deleted |
 | `Dockerfile` | used by CI only; the image is `ghcr.io/<owner>/cmpose-app` |
 
+The `Dockerfile` pins its base images by digest (`<image>:<tag>@sha256:…`), so a rebuild uses the same bytes until
+Dependabot's `docker` updates (configured for `/deploy`) open a pull request that moves the digest.
+
 All values below (`<owner>`, `<domain>`, passwords, project ids) are placeholders.
 
 ## Server repository contract
@@ -109,9 +112,11 @@ means restoring that dump.
 - The keys come from
   `https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com` and are cached. A
   `kid` never seen before is looked up there; after a lookup that found nothing, the next unknown `kid` waits a
-  minute (it is a `401` until then), so made-up kids cannot use up the fetch budget that real keys need.
-- Network: the container needs outgoing HTTPS to `www.googleapis.com` (port 443). If it cannot reach it and holds no
-  cached key, authenticated requests answer `503 AUTH_UNAVAILABLE` instead of `401`.
+  minute (it is a `401` until then), so made-up kids cannot use up the fetch budget that real keys need. Each such
+  lookup reads Google's whole key set, so a newly published key is learned even during a flood of made-up kids.
+- Network: the container needs outgoing HTTPS to `www.googleapis.com` (port 443). If it cannot reach it (or a fetch
+  takes more than a few seconds) and holds no cached key, authenticated requests answer `503 AUTH_UNAVAILABLE` instead
+  of `401`.
 - The server's clock must be synchronised (NTP); a clock off by more than the tolerance rejects valid tokens.
 
 ## Privacy notes
