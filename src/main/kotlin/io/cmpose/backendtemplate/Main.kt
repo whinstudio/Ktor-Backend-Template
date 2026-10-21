@@ -2,6 +2,8 @@ package io.cmpose.backendtemplate
 
 import com.auth0.jwk.JwkProvider
 import com.auth0.jwk.JwkProviderBuilder
+import com.auth0.jwk.UrlJwkProvider
+import io.cmpose.backendtemplate.auth.PublishedKeyIds
 import io.cmpose.backendtemplate.config.AppConfig
 import io.cmpose.backendtemplate.config.ConfigException
 import io.cmpose.backendtemplate.db.connectDatabase
@@ -24,6 +26,11 @@ fun googleJwkProvider(): JwkProvider = JwkProviderBuilder(URI(GOOGLE_JWKS).toURL
     .rateLimited(JWKS_FETCHES_PER_MINUTE, 1, TimeUnit.MINUTES)
     .build()
 
+/** Every kid in Google's key set, fetched uncached on each call (the verifier limits how often; also local runner). */
+fun googleKeyIds(): PublishedKeyIds = PublishedKeyIds {
+    UrlJwkProvider(URI(GOOGLE_JWKS).toURL()).all.mapNotNull { it.id }.toSet()
+}
+
 fun main() {
     val log = LoggerFactory.getLogger("Main")
     val config = try {
@@ -40,6 +47,7 @@ fun main() {
         log.error("Database unavailable at startup: {}", e::class.java.name)
         exitProcess(1)
     }
-    embeddedServer(Netty, port = config.port) { module(AppDeps(config, googleJwkProvider(), db)) }
-        .start(wait = true)
+    embeddedServer(Netty, port = config.port) {
+        module(AppDeps(config, googleJwkProvider(), db, jwkKeyIds = googleKeyIds()))
+    }.start(wait = true)
 }

@@ -4,6 +4,7 @@ package io.cmpose.backendtemplate
 
 import com.auth0.jwk.JwkProvider
 import io.cmpose.backendtemplate.auth.FirebaseTokenVerifier
+import io.cmpose.backendtemplate.auth.PublishedKeyIds
 import io.cmpose.backendtemplate.auth.UserAuth
 import io.cmpose.backendtemplate.auth.installUserAuth
 import io.cmpose.backendtemplate.config.AppConfig
@@ -37,14 +38,16 @@ import org.jetbrains.exposed.sql.Database
 import java.nio.file.Path
 
 /**
- * What the application needs from outside: settings, Google's signing keys, the database (absent in some tests) and
- * where uploaded files go (by default the local disk at `FILES_DIR`).
+ * What the application needs from outside: settings, Google's signing keys, the database (absent in some tests),
+ * where uploaded files go (by default the local disk at `FILES_DIR`) and Google's published kids (see
+ * [FirebaseTokenVerifier]; null in tests, which then look up one kid at a time).
  */
 class AppDeps(
     val config: AppConfig,
     val jwkProvider: JwkProvider,
     val db: Database?,
     val fileStore: FileStore = LocalDiskFileStore(Path.of(config.filesDir)),
+    val jwkKeyIds: PublishedKeyIds? = null,
 )
 
 fun Application.module(deps: AppDeps) {
@@ -72,7 +75,12 @@ fun Application.module(deps: AppDeps) {
     val items = deps.db?.let(::ItemRepository)
     // /cmpose:sample
     if (users != null) {
-        val verifier = FirebaseTokenVerifier(deps.jwkProvider, config.firebaseProjectId, config.jwtClockSkewSeconds)
+        val verifier = FirebaseTokenVerifier(
+            deps.jwkProvider,
+            config.firebaseProjectId,
+            config.jwtClockSkewSeconds,
+            publishedKeyIds = deps.jwkKeyIds,
+        )
         installUserAuth(UserAuth(verifier, users))
     }
     installRateLimit(config)
