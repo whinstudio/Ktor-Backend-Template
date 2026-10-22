@@ -26,6 +26,11 @@ object TestDb {
         postgres.postgresDatabase.connection.use { it.createStatement().execute("CREATE DATABASE $name") }
     }
 
+    /** Runs one SQL [statement] (a test's own schema tweak) in a transaction of its own. */
+    fun execute(statement: String) {
+        transaction(database) { exec(statement) }
+    }
+
     /** Empties every table Flyway created; a block body keeps the return type `Unit` for `@BeforeTest`. */
     fun reset() {
         transaction(database) {

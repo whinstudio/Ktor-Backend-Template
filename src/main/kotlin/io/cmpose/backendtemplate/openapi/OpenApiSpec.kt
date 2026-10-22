@@ -190,7 +190,7 @@ private fun JsonObjectBuilder.errorSchema() {
 }
 
 private fun JsonObjectBuilder.accountSchemas() {
-    put("Me", objectOf(listOf("id")) {
+    put("Me", objectOf(listOf("id", "email", "displayName")) {
         put("id", uuid())
         put("email", string(description = "The verified email, else null").nullable())
         put("displayName", string(description = "The name the user chose to show, else null").nullable())
