@@ -101,7 +101,9 @@ class UserRepository(
 
     /**
      * Sets (or, with null, clears) [user]'s display name; the caller has trimmed and checked it. [alongside] runs after
-     * it in the same transaction, so when [alongside] throws, the name stays as it was.
+     * it in the same transaction, so when [alongside] throws, the name stays as it was. Repository calls inside it join
+     * this transaction because nested transactions are off (Exposed's default); turning on `useNestedTransactions`
+     * would give them savepoints of their own. Keep it to database work: it runs again if the transaction is retried.
      */
     fun setDisplayName(user: UserId, name: String?, alongside: () -> Unit = {}) {
         transaction(db) {
