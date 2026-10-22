@@ -99,9 +99,15 @@ class UserRepository(
         Users.select(Users.displayName).where { Users.id eq user.value }.firstOrNull()?.get(Users.displayName)
     }
 
-    /** Sets (or, with null, clears) [user]'s display name; the caller has trimmed and checked it. */
-    fun setDisplayName(user: UserId, name: String?) {
-        transaction(db) { Users.update({ Users.id eq user.value }) { it[displayName] = name } }
+    /**
+     * Sets (or, with null, clears) [user]'s display name; the caller has trimmed and checked it. [alongside] runs after
+     * it in the same transaction, so when [alongside] throws, the name stays as it was.
+     */
+    fun setDisplayName(user: UserId, name: String?, alongside: () -> Unit = {}) {
+        transaction(db) {
+            Users.update({ Users.id eq user.value }) { it[displayName] = name }
+            alongside()
+        }
     }
 
     /**

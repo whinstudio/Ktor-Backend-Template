@@ -61,6 +61,18 @@ class ProfileRoutesTest {
     }
 
     @Test
+    fun aMissingDisplayNameClearsIt() = withApp { client ->
+        client.profile(alice, ProfileUpdate(displayName = "Ada"))
+        val response = client.put("/api/v1/me/profile") {
+            bearerAuth(alice)
+            contentType(ContentType.Application.Json)
+            setBody("{}")
+        }
+        assertEquals(HttpStatusCode.NoContent, response.status)
+        assertNull(client.displayName(alice))
+    }
+
+    @Test
     fun tooLongDisplayNameIs400WithFieldError() = withApp { client ->
         client.profile(alice, ProfileUpdate(displayName = "Ada"))
         val response = client.profile(alice, ProfileUpdate(displayName = "a".repeat(81)))
@@ -114,6 +126,22 @@ class ProfileRoutesTest {
     fun nullPersonalSpaceNameKeepsTheName() = withApp { client ->
         client.profile(alice, ProfileUpdate(personalSpaceName = "Ev"))
         assertEquals(HttpStatusCode.NoContent, client.profile(alice, ProfileUpdate(displayName = "Ada")).status)
+        assertEquals("Ev", client.personalSpace(alice).name)
+    }
+
+    @Test
+    fun aFailedPersonalSpaceRenameLeavesTheDisplayNameAsItWas() = withApp { client ->
+        client.profile(alice, ProfileUpdate(displayName = "Old", personalSpaceName = "Ev"))
+        // The database refuses this one name, so the rename fails after the display name was written.
+        TestDb.execute("ALTER TABLE spaces ADD CONSTRAINT test_refused_name CHECK (name <> 'Refused') NOT VALID")
+        try {
+            val response = client.profile(alice, ProfileUpdate(displayName = "New", personalSpaceName = "Refused"))
+            assertEquals(HttpStatusCode.InternalServerError, response.status)
+            assertEquals("INTERNAL", response.errorCode())
+        } finally {
+            TestDb.execute("ALTER TABLE spaces DROP CONSTRAINT test_refused_name")
+        }
+        assertEquals("Old", client.displayName(alice))
         assertEquals("Ev", client.personalSpace(alice).name)
     }
     // /cmpose:sharing

@@ -95,6 +95,15 @@ class OpenApiTest {
     }
 
     @Test
+    fun theMeSchemaRequiresEmailAndDisplayName() {
+        val me = OpenApi.document(null)["components"]!!.jsonObject["schemas"]!!.jsonObject["Me"]!!.jsonObject
+        assertEquals(listOf("id", "email", "displayName"), me["required"]!!.jsonArray.map { it.jsonPrimitive.content })
+        val properties = me["properties"]!!.jsonObject
+        assertEquals(JsonPrimitive(true), properties["email"]!!.jsonObject["nullable"])
+        assertEquals(JsonPrimitive(true), properties["displayName"]!!.jsonObject["nullable"])
+    }
+
+    @Test
     fun builtOnceAndServedTheSame() = testApplication {
         application { module(testDeps()) }
         val first = client.get("/api/v1/openapi.json").bodyAsText()

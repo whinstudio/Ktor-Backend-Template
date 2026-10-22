@@ -70,11 +70,10 @@ fun Route.userRoutes(
         val name = displayName(update.displayName)
         // cmpose:sharing
         val personalName = update.personalSpaceName?.let { spaceName(it, field = "personalSpaceName") }
+        // Both writes in one transaction: when the rename fails, the display name stays as it was.
         // /cmpose:sharing
-        users.setDisplayName(user, name)
-        // cmpose:sharing
-        personalName?.let { spaces.rename(spaces.personalSpace(user), it) }
-        // /cmpose:sharing
+        // cmpose:sharing-off: users.setDisplayName(user, name)
+        users.setDisplayName(user, name) { personalName?.let { spaces.rename(spaces.personalSpace(user), it) } }
         call.respond(HttpStatusCode.NoContent)
     }
     /*
