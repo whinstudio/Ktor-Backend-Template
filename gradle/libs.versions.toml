@@ -16,7 +16,7 @@ embeddedPostgres = "2.1.0"
 embeddedPostgresBinaries = "16.15.0"
 shadow = "9.5.1"
 # OWASP dependency scan, run by CI only when NVD_API_KEY is set
-dependencyCheck = "12.1.3"
+dependencyCheck = "13.0.0"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
