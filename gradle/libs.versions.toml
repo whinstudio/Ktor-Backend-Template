@@ -2,7 +2,7 @@
 kotlin = "2.3.21"
 kotlinxSerializationJson = "1.11.0"
 ktor = "3.5.0"
-detekt = "2.0.0-alpha.3"
+detekt = "2.0.0-alpha.6"
 jwksRsa = "0.22.1"
 javaJwt = "4.5.2"
 exposed = "0.61.0"
