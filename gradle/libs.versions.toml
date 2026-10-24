@@ -1,6 +1,6 @@
 [versions]
 kotlin = "2.3.21"
-kotlinxSerializationJson = "1.11.0"
+kotlinxSerializationJson = "1.12.0"
 ktor = "3.5.0"
 detekt = "2.0.0-alpha.3"
 jwksRsa = "0.22.1"
