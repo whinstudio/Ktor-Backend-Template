@@ -21,6 +21,9 @@ import kotlin.test.assertTrue
 
 class OpenApiTest {
     private fun JsonObject.serverUrl() = this["servers"]!!.jsonArray[0].jsonObject["url"]!!.jsonPrimitive.content
+    private fun JsonObject.schema(name: String) =
+        this["components"]!!.jsonObject["schemas"]!!.jsonObject[name]!!.jsonObject
+    private fun JsonElement.strings() = jsonArray.map { it.jsonPrimitive.content }
 
     @Test
     fun servedAsJsonWithThePublicBaseUrl() = testApplication {
@@ -96,12 +99,53 @@ class OpenApiTest {
 
     @Test
     fun theMeSchemaRequiresEmailAndDisplayName() {
-        val me = OpenApi.document(null)["components"]!!.jsonObject["schemas"]!!.jsonObject["Me"]!!.jsonObject
-        assertEquals(listOf("id", "email", "displayName"), me["required"]!!.jsonArray.map { it.jsonPrimitive.content })
+        val me = OpenApi.document(null).schema("Me")
+        assertEquals(listOf("id", "email", "displayName"), me["required"]!!.strings())
         val properties = me["properties"]!!.jsonObject
         assertEquals(JsonPrimitive(true), properties["email"]!!.jsonObject["nullable"])
         assertEquals(JsonPrimitive(true), properties["displayName"]!!.jsonObject["nullable"])
     }
+
+    @Test
+    fun theErrorCarriesTheQuota() {
+        val detail = OpenApi.document(null).schema("Error")["properties"]!!.jsonObject["error"]!!.jsonObject
+        val quota = detail["properties"]!!.jsonObject["quota"]!!.jsonObject
+        assertEquals(JsonPrimitive("string"), quota["type"])
+    }
+
+    // cmpose:sharing
+    @Test
+    fun listsAndRevokesPendingInvites() {
+        val paths = OpenApi.document(null)["paths"]!!.jsonObject
+        val invites = paths["/spaces/{id}/invites"]!!.jsonObject
+        assertEquals(setOf("parameters", "get", "post"), invites.keys)
+        val listed = invites["get"]!!.jsonObject["responses"]!!.jsonObject["200"]!!.jsonObject["content"]!!
+            .jsonObject["application/json"]!!.jsonObject["schema"]!!.jsonObject
+        assertEquals(JsonPrimitive("array"), listed["type"])
+        assertEquals(JsonPrimitive("#/components/schemas/PendingInvite"), listed["items"]!!.jsonObject["\$ref"])
+        val invite = paths["/spaces/{id}/invites/{inviteId}"]!!.jsonObject
+        assertEquals(setOf("parameters", "delete"), invite.keys)
+        val revoked = invite["delete"]!!.jsonObject["responses"]!!.jsonObject
+        assertTrue("204" in revoked, "no 204 on revoke")
+        assertTrue("409" in revoked, "no 409 on revoke")
+    }
+
+    @Test
+    fun thePendingInviteHasItsFieldsAndNoToken() {
+        val pending = OpenApi.document(null).schema("PendingInvite")
+        assertEquals(listOf("id", "role", "createdAt", "expiresAt"), pending["required"]!!.strings())
+        assertEquals(setOf("id", "role", "createdAt", "expiresAt"), pending["properties"]!!.jsonObject.keys)
+        assertTrue("token" !in pending["properties"]!!.jsonObject)
+    }
+
+    @Test
+    fun aRevokedInviteIsAState() {
+        val document = OpenApi.document(null)
+        assertEquals(listOf("valid", "used", "expired", "revoked"), document.schema("InviteState")["enum"]!!.strings())
+        val accept = document["paths"]!!.jsonObject["/invites/accept"]!!.jsonObject["post"]!!.jsonObject
+        assertTrue("410" in accept["responses"]!!.jsonObject)
+    }
+    // /cmpose:sharing
 
     @Test
     fun builtOnceAndServedTheSame() = testApplication {
