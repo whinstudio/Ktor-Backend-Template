@@ -6,7 +6,6 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -82,6 +81,10 @@ class LocalFolderTest {
         assertTrue(file.exists())
     }
 
+    @Test fun resetOfAMissingFolderSucceeds() {
+        assertNull(resetLocalFolder(project.resolve(".local-server"), project))
+    }
+
     @Test fun resetDoesNotFollowALinkedFolder() {
         val outside = root.resolve("outside").apply { mkdirs() }
         val kept = outside.resolve("upload.bin").apply { writeText("keep") }
@@ -99,7 +102,8 @@ class LocalFolderTest {
         postgres.setWritable(false)
         try {
             val problem = assertNotNull(resetLocalFolder(dir, project))
-            assertEquals("could not delete localServerDir: ${dir.canonicalFile}", problem)
+            assertTrue(problem.startsWith("could not delete localServerDir: "), problem)
+            assertContains(problem, dir.canonicalFile.path)
         } finally {
             postgres.setWritable(true)
         }

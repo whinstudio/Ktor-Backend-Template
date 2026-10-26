@@ -15,8 +15,8 @@ fun resetLocalFolder(dir: File, projectDir: File): String? =
     localFolderProblem(dir, projectDir) ?: try {
         dir.toPath().deleteRecursively()
         null
-    } catch (_: IOException) {
-        "could not delete localServerDir: ${dir.canonicalFile}"
+    } catch (e: IOException) {
+        "could not delete localServerDir: ${dir.canonicalFile} (${e.message})"
     }
 
 /** `./gradlew resetLocal` — args[0] is the .local-server folder, args[1] this project. */
