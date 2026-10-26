@@ -99,8 +99,8 @@ class OpenApiTest {
 
     @Test
     fun theMeSchemaRequiresEmailAndDisplayName() {
-        val me = OpenApi.document(null)["components"]!!.jsonObject["schemas"]!!.jsonObject["Me"]!!.jsonObject
-        assertEquals(listOf("id", "email", "displayName"), me["required"]!!.jsonArray.map { it.jsonPrimitive.content })
+        val me = OpenApi.document(null).schema("Me")
+        assertEquals(listOf("id", "email", "displayName"), me["required"]!!.strings())
         val properties = me["properties"]!!.jsonObject
         assertEquals(JsonPrimitive(true), properties["email"]!!.jsonObject["nullable"])
         assertEquals(JsonPrimitive(true), properties["displayName"]!!.jsonObject["nullable"])
@@ -126,7 +126,8 @@ class OpenApiTest {
         val invite = paths["/spaces/{id}/invites/{inviteId}"]!!.jsonObject
         assertEquals(setOf("parameters", "delete"), invite.keys)
         val revoked = invite["delete"]!!.jsonObject["responses"]!!.jsonObject
-        assertTrue("204" in revoked && "409" in revoked)
+        assertTrue("204" in revoked, "no 204 on revoke")
+        assertTrue("409" in revoked, "no 409 on revoke")
     }
 
     @Test
