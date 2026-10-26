@@ -1,10 +1,12 @@
 package io.cmpose.backendtemplate.local
 
 import java.io.File
+import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -71,5 +73,35 @@ class LocalFolderTest {
         val main = src.resolve("Main.kt").apply { writeText("") }
         assertNotNull(resetLocalFolder(src, project))
         assertTrue(main.exists())
+    }
+
+    @Test fun aRegularFileIsRefused() {
+        val file = root.resolve("notes.txt").apply { writeText("keep") }
+        assertNotNull(localFolderProblem(file, project))
+        assertNotNull(resetLocalFolder(file, project))
+        assertTrue(file.exists())
+    }
+
+    @Test fun resetDoesNotFollowALinkedFolder() {
+        val outside = root.resolve("outside").apply { mkdirs() }
+        val kept = outside.resolve("upload.bin").apply { writeText("keep") }
+        val dir = project.resolve(".local-server").apply { mkdirs() }
+        Files.createSymbolicLink(dir.resolve("files").toPath(), outside.toPath())
+        assertNull(resetLocalFolder(dir, project))
+        assertFalse(dir.exists())
+        assertTrue(kept.exists())
+    }
+
+    @Test fun resetReportsAFolderItCouldNotDelete() {
+        val dir = project.resolve(".local-server").apply { mkdirs() }
+        val postgres = dir.resolve("postgres").apply { mkdirs() }
+        postgres.resolve("PG_VERSION").writeText("16")
+        postgres.setWritable(false)
+        try {
+            val problem = assertNotNull(resetLocalFolder(dir, project))
+            assertEquals("could not delete localServerDir: ${dir.canonicalFile}", problem)
+        } finally {
+            postgres.setWritable(true)
+        }
     }
 }

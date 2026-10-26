@@ -1,13 +1,22 @@
 package io.cmpose.backendtemplate.local
 
 import java.io.File
+import java.io.IOException
+import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.deleteRecursively
 import kotlin.system.exitProcess
 
-/** Deletes [dir] unless [localFolderProblem] refuses it; returns that problem, or null once the folder is gone. */
+/**
+ * Deletes [dir] unless [localFolderProblem] refuses it; returns that problem, or null once the folder is gone.
+ * Links inside [dir] are removed, not followed. A delete that fails is reported, so resetLocal does not pass.
+ */
+@OptIn(ExperimentalPathApi::class)
 fun resetLocalFolder(dir: File, projectDir: File): String? =
-    localFolderProblem(dir, projectDir) ?: run {
-        dir.deleteRecursively()
+    localFolderProblem(dir, projectDir) ?: try {
+        dir.toPath().deleteRecursively()
         null
+    } catch (_: IOException) {
+        "could not delete localServerDir: ${dir.canonicalFile}"
     }
 
 /** `./gradlew resetLocal` — args[0] is the .local-server folder, args[1] this project. */
