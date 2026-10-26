@@ -4,7 +4,8 @@
 #   full         sharing on,  sample on
 #   sharing-off  sharing off, sample on   (no sharing word: space, invite, member)
 #   cmp          sharing on,  sample off  (no sample word: feature/sample, /items, Item…, V3__sample; no Docker image)
-# Every variant: no cmpose: marker left, the word check of its off option in the code, docs and deploy parts,
+#   minimal      sharing off, sample off  (both word checks)
+# Every variant: no cmpose: marker left, the word check of each off option in the code, docs and deploy parts,
 # ./gradlew build (compile, detekt, tests), tools/deploy-lint.sh, and the Docker image (non-root user) unless
 # --no-docker.
 # Usage: bash tools/gate.sh [--no-docker] [--offline]   (prints "== N passed, M failed", exit 1 on any failure)
@@ -120,7 +121,7 @@ check "resolve-markers tests" bash "$root/tools/resolve-markers.test.sh"
 check "sharing paths exist" option_paths_exist sharing
 check "sample paths exist" option_paths_exist sample
 # <name> <sharing> <sample> <docker image: 1 or 0>
-for spec in "full on on 1" "sharing-off off on 1" "cmp on off 0"; do
+for spec in "full on on 1" "sharing-off off on 1" "cmp on off 0" "minimal off off 1"; do
     read -r variant sharing sample image <<<"$spec"
     dir="$work/$variant"
     check "$variant: copy" copy "$dir"
