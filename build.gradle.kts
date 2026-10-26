@@ -77,29 +77,22 @@ sourceSets.test {
 // The local server's folder, relative to this project: `localServerDir=<path>` in gradle.properties or -PlocalServerDir=.
 val localServerDir = layout.projectDirectory.dir(providers.gradleProperty("localServerDir").getOrElse(".local-server"))
 
-// Refuses a localServerDir that is this project or contains it (`.` or `..`), as resetLocal would delete it. Built from
-// plain files so that the task action keeps no reference to the build script (configuration cache).
-fun localServerDirGuard(dir: File, projectDir: File) = Action<Task> {
-    val folder = dir.canonicalFile.toPath()
-    if (projectDir.canonicalFile.toPath().startsWith(folder)) {
-        throw GradleException("localServerDir must not be this project or one of its parent folders: $folder")
-    }
-}
-
 tasks.register<JavaExec>("runLocal") {
     group = "application"
     description = "Runs the server on 127.0.0.1 with an embedded PostgreSQL kept in .local-server/ (or localServerDir)"
     classpath = local.runtimeClasspath
     mainClass.set("io.cmpose.backendtemplate.local.LocalMainKt")
-    args(localServerDir.asFile.absolutePath)
-    doFirst(localServerDirGuard(localServerDir.asFile, layout.projectDirectory.asFile))
+    args(localServerDir.asFile.absolutePath, layout.projectDirectory.asFile.absolutePath)
 }
 
-tasks.register<Delete>("resetLocal") {
+// Deletes the folder in Kotlin (LocalReset.kt), which first refuses this project, a parent of it or a folder holding
+// files the local server did not write.
+tasks.register<JavaExec>("resetLocal") {
     group = "application"
     description = "Deletes .local-server/ or localServerDir (database, files and config)"
-    delete(localServerDir)
-    doFirst(localServerDirGuard(localServerDir.asFile, layout.projectDirectory.asFile))
+    classpath = local.runtimeClasspath
+    mainClass.set("io.cmpose.backendtemplate.local.LocalResetKt")
+    args(localServerDir.asFile.absolutePath, layout.projectDirectory.asFile.absolutePath)
 }
 
 // The API description the server serves at /api/v1/openapi.json, as a file for contract checks.

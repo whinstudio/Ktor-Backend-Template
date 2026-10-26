@@ -48,8 +48,9 @@ and the tests.
 
 - `localServerDir=<path>` in `gradle.properties` (or `-PlocalServerDir=<path>`) moves the folder; the path is relative
   to this project. `runLocal` and `resetLocal` both use it, and the config file is then `<path>/config.properties`.
-  The folder holds the local database and config, so it must stay git-ignored; it may not be this project or a folder
-  that contains it.
+  The folder holds the local database and config, so it must stay git-ignored. It may not be this project or a folder
+  that contains it, and an existing folder may hold only what the local server wrote (`config.properties`, `postgres/`,
+  `files/`, `server.pid`); otherwise `runLocal` and `resetLocal` refuse it.
 - `./gradlew writeOpenApi` writes the API description the server serves to `build/openapi/openapi.json`.
 
 ## API conventions
