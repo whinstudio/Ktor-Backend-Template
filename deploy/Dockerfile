@@ -1,7 +1,7 @@
 # Build from the repository root: docker build -f deploy/Dockerfile --build-arg APP_VERSION=<tag or sha> .
 # No HEALTHCHECK here: the compose file probes /ready.
 
-FROM gradle:9-jdk21@sha256:37110d25b7a0f866d07f7e61968347b83d2e0fd01bd6ddf74c9ae2ff04000691 AS build
+FROM gradle:9-jdk21@sha256:85f8f572045bfb31874d66d7d8a2bd0c17d8cb9ad34b6a4d02f5d552b4b92c04 AS build
 WORKDIR /src
 # The wrapper and build scripts first, so the dependency layer is cached until they change.
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties detekt.yml ./
