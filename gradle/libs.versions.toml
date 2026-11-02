@@ -1,5 +1,6 @@
 [versions]
-kotlin = "2.3.21"
+# Inside a Compose Multiplatform project (included as server/) this must equal the app's kotlin version: bump both together.
+kotlin = "2.4.21"
 kotlinxSerializationJson = "1.12.0"
 ktor = "3.5.0"
 detekt = "2.0.0-alpha.6"
