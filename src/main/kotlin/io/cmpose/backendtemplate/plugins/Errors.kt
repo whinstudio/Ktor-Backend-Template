@@ -73,6 +73,12 @@ internal fun describe(e: Throwable): String {
 
 private fun Throwable.causes() = generateSequence(this) { it.cause }.take(MAX_CAUSES)
 
+private const val FOREIGN_KEY_VIOLATION_SQL_STATE = "23503"
+
+/** True when a database error along [this]'s cause chain is a foreign key violation (the referenced row is gone). */
+internal fun Throwable.isForeignKeyViolation() =
+    causes().filterIsInstance<SQLException>().any { it.sqlState == FOREIGN_KEY_VIOLATION_SQL_STATE }
+
 /** Answers with the shared error body. */
 suspend fun ApplicationCall.respondError(
     status: HttpStatusCode,

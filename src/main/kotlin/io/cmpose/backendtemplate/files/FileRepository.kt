@@ -1,6 +1,8 @@
 package io.cmpose.backendtemplate.files
 
 import io.cmpose.backendtemplate.plugins.Quota
+import io.cmpose.backendtemplate.plugins.isForeignKeyViolation
+import io.cmpose.backendtemplate.plugins.notFound
 import io.cmpose.backendtemplate.plugins.quotaExceeded
 import io.cmpose.backendtemplate.sharing.Spaces
 import io.cmpose.backendtemplate.users.UserId
@@ -18,6 +20,7 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.vendors.ForUpdateOption
+import java.sql.SQLException
 import java.util.UUID
 
 // Mirrors db/migration/V1__core.sql; Flyway owns the schema.
@@ -51,22 +54,33 @@ data class StoredFile(
 // cmpose:sharing-off: /** File rows; every lookup takes the caller: another user's file is not found. */
 /** File rows. Lookups check nothing: callers check the caller's role in the file's space first (`requireRole`). */
 class FileRepository(private val db: Database, private val maxStorageBytesPerUser: Long = 0) {
-    /** Adds the row, or throws a 409 `QUOTA_EXCEEDED` (`storage`) when it would take its user past the quota. */
+    /**
+     * Adds the row, or throws a 409 `QUOTA_EXCEEDED` (`storage`) when it would take its user past the quota. A 404 when
+     * the row it points at was deleted after the caller's role was checked: the foreign key refuses the insert.
+     */
     fun add(file: StoredFile) {
         transaction(db) {
             if (maxStorageBytesPerUser > 0) checkStorage(file)
-            StoredFiles.insert {
-                it[id] = file.id
-                // cmpose:sharing-off: it[ownerId] = file.ownerId.value
-                it[spaceId] = file.spaceId
-                // cmpose:sharing
-                it[uploadedBy] = file.uploadedBy?.value
-                // /cmpose:sharing
-                it[path] = file.path
-                it[mime] = file.mime
-                it[size] = file.size
-                it[createdAt] = System.currentTimeMillis()
+            try {
+                insert(file)
+            } catch (e: SQLException) {
+                if (e.isForeignKeyViolation()) notFound() else throw e
             }
+        }
+    }
+
+    private fun insert(file: StoredFile) {
+        StoredFiles.insert {
+            it[id] = file.id
+            // cmpose:sharing-off: it[ownerId] = file.ownerId.value
+            it[spaceId] = file.spaceId
+            // cmpose:sharing
+            it[uploadedBy] = file.uploadedBy?.value
+            // /cmpose:sharing
+            it[path] = file.path
+            it[mime] = file.mime
+            it[size] = file.size
+            it[createdAt] = System.currentTimeMillis()
         }
     }
 
@@ -79,9 +93,11 @@ class FileRepository(private val db: Database, private val maxStorageBytesPerUse
     private fun checkStorage(file: StoredFile) {
         // cmpose:sharing
         // The space's owner pays, whoever uploaded (an editor's file counts against them), over every space they own.
+        // A space deleted since the caller's role was checked is a 404, not a 500.
+        val space = Spaces.select(Spaces.ownerId).where { Spaces.id eq file.spaceId }.singleOrNull()
         // /cmpose:sharing
         // cmpose:sharing-off: val charged = file.ownerId.value
-        val charged = Spaces.select(Spaces.ownerId).where { Spaces.id eq file.spaceId }.single()[Spaces.ownerId]
+        val charged = space?.get(Spaces.ownerId) ?: notFound()
         Users.select(Users.id).where { Users.id eq charged }
             .forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
             .toList()

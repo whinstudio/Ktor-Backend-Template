@@ -1,8 +1,11 @@
 package io.cmpose.backendtemplate
 
+import io.cmpose.backendtemplate.files.FileRepository
 import io.cmpose.backendtemplate.files.FileStore
 import io.cmpose.backendtemplate.files.LocalDiskFileStore
+import io.cmpose.backendtemplate.files.StoredFile
 import io.cmpose.backendtemplate.files.StoredFiles
+import io.cmpose.backendtemplate.plugins.ApiException
 import io.cmpose.backendtemplate.sharing.Role
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -44,6 +47,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -395,6 +399,29 @@ class FileRoutesTest {
             }
         }
         assertEquals(2L, rowCount())
+    }
+
+    @Test
+    fun addingAFileToASpaceThatNoLongerExistsIsA404() = assertAddingToAMissingSpaceIs404(maxStorageBytesPerUser = 1000)
+
+    @Test
+    fun addingAFileToASpaceThatNoLongerExistsIsA404WithoutAQuota() =
+        assertAddingToAMissingSpaceIs404(maxStorageBytesPerUser = 0)
+
+    /** Adds a file row straight to a space that does not exist: a 404, and no row. */
+    private fun assertAddingToAMissingSpaceIs404(maxStorageBytesPerUser: Long) {
+        val files = FileRepository(TestDb.database, maxStorageBytesPerUser)
+        val file = StoredFile(
+            id = UUID.randomUUID(),
+            spaceId = UUID.randomUUID(),
+            uploadedBy = null,
+            path = "gone",
+            mime = "image/png",
+            size = 10,
+        )
+        val error = assertFailsWith<ApiException> { files.add(file) }
+        assertEquals(HttpStatusCode.NotFound, error.status)
+        assertEquals(0L, rowCount())
     }
 
     // /cmpose:sharing
