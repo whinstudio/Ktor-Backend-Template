@@ -7,9 +7,13 @@ import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserIdentities
 import io.cmpose.backendtemplate.users.Users
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.sql.Case
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.Expression
+import org.jetbrains.exposed.sql.QueryBuilder
 import org.jetbrains.exposed.sql.ReferenceOption
 import org.jetbrains.exposed.sql.ResultRow
+import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
@@ -17,6 +21,7 @@ import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertIgnore
+import org.jetbrains.exposed.sql.intLiteral
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -28,6 +33,9 @@ const val MAX_SPACE_NAME = 80
 
 /** The name a personal space starts with; its owner may rename it. */
 const val PERSONAL_SPACE_NAME = "Personal"
+
+/** Most spaces `GET /spaces` returns in one response; the list has no paging. */
+const val MAX_LISTED_SPACES = 200
 
 // Mirror db/migration/V2__sharing.sql; Flyway owns the schema, these objects only describe it to Exposed.
 
@@ -71,6 +79,18 @@ data class MemberResponse(
 
 /** What a role change or a removal did. */
 enum class MemberChange { DONE, NOT_MEMBER, LAST_OWNER }
+
+/**
+ * `LOWER(name) COLLATE "C"`: the name lower-cased, compared by code point rather than by the database's locale, so
+ * the order does not depend on how the database was set up.
+ */
+private object LowerNameBytewise : Expression<String>() {
+    override fun toQueryBuilder(queryBuilder: QueryBuilder) = queryBuilder {
+        +"LOWER("
+        +Spaces.name
+        +") COLLATE \"C\""
+    }
+}
 
 /**
  * Locks the space's row until the transaction ends; needs a transaction. Whatever counts against a space (its members,
@@ -124,15 +144,21 @@ class SpaceRepository(
         }
     }
 
-    /** The spaces [user] belongs to: their personal space first, then by name. */
-    fun listFor(user: UserId): List<SpaceResponse> = transaction(db) {
-        val rows = (SpaceMembers innerJoin Spaces).selectAll().where { SpaceMembers.userId eq user.value }.toList()
+    /**
+     * The spaces [user] belongs to, at most [limit] of them: their personal space first, then by name ignoring case,
+     * then by id. The order and the bound are applied in SQL; member counts are read for the returned rows only.
+     */
+    fun listFor(user: UserId, limit: Int = MAX_LISTED_SPACES): List<SpaceResponse> = transaction(db) {
+        val ownPersonal = Case()
+            .When((Spaces.isPersonal eq true) and (Spaces.ownerId eq user.value), intLiteral(0))
+            .Else(intLiteral(1))
+        val rows = (SpaceMembers innerJoin Spaces).selectAll()
+            .where { SpaceMembers.userId eq user.value }
+            .orderBy(ownPersonal to SortOrder.ASC, LowerNameBytewise to SortOrder.ASC, Spaces.id to SortOrder.ASC)
+            .limit(limit)
+            .toList()
         val counts = memberCounts(rows.map { it[Spaces.id] })
-        rows.sortedWith(
-            compareByDescending<ResultRow> { it[Spaces.isPersonal] && it[Spaces.ownerId] == user.value }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it[Spaces.name] }
-                .thenBy { it[Spaces.id] },
-        ).map { it.toSpace(counts[it[Spaces.id]] ?: 1) }
+        rows.map { it.toSpace(counts[it[Spaces.id]] ?: 1) }
     }
 
     /** The space as [user] sees it, or null when they are not a member. */

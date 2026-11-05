@@ -65,8 +65,8 @@ and the tests.
 
   Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
   `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
-  `UPLOADS_BUSY`, `QUOTA_EXCEEDED` (409, with `quota` naming the limit reached: `storage`). A 500 carries no detail
-  beyond the request id.
+  `UPLOADS_BUSY`, `DOWNLOADS_BUSY`, `QUOTA_EXCEEDED` (409, with `quota` naming the limit reached: `storage`). A 500
+  carries no detail beyond the request id.
 <!-- cmpose:sharing -->
   With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
   (409, already used; also on revoking a used one), `INVITE_REVOKED` (410, revoked by an owner) and `INVITE_EXPIRED`
@@ -100,6 +100,8 @@ and the tests.
   The sample feature has both: `GET /api/v1/items` pages, `GET /api/v1/items/recent` returns the newest 20 as one array.
 <!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
+- `GET /api/v1/spaces` returns at most 200 spaces as one array, not paged: the caller's personal space first, then by
+  name ignoring case.
 - Invites: an OWNER lists a space's valid invites with `GET /api/v1/spaces/{id}/invites` (newest first, at most 200,
   not paged; `id`, `role`, `createdAt`, `expiresAt`, never the token) and revokes one with
   `DELETE /api/v1/spaces/{id}/invites/{inviteId}` (204, also when called again; 409 `INVITE_USED` once used; another
@@ -112,7 +114,9 @@ and the tests.
 
 Every setting comes from the environment (`AppConfig`); the server refuses to start when a required one is missing or
 invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`, `FIREBASE_PROJECT_ID`, `FILES_DIR`.
-`deploy/.env.example` lists the optional ones with their defaults.
+`deploy/.env.example` lists the optional ones with their defaults. Only the Firebase sign-in methods in
+`ALLOWED_SIGN_IN_PROVIDERS` (default `password,google.com,apple.com`) get an account; a token from any other method
+(anonymous, phone, custom) or without one is refused with 401. Add a method there when the app enables it.
 
 ## Add a feature
 

@@ -19,6 +19,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.log
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.contentType
 import io.ktor.server.request.receiveMultipart
@@ -37,7 +38,7 @@ import java.io.IOException
 import java.util.UUID
 
 private const val FILE_FIELD = "file"
-private const val UPLOADS_BUSY_RETRY_SECONDS = 5
+private const val BUSY_RETRY_SECONDS = 5
 
 // cmpose:sharing
 private const val SPACE_FIELD = "spaceId"
@@ -86,20 +87,31 @@ private suspend fun ApplicationCall.receiveFile(
 }
 
 /**
- * Runs [block] holding one of [uploads]' permits, so at most that many upload bodies are in memory at once. With none
- * free the answer is at once a 503 `UPLOADS_BUSY` with `Retry-After`; nobody waits for a permit.
+ * Runs [block] holding one of [permits], so at most that many [block]s (upload bodies or downloaded files in memory)
+ * run at once. With none free the answer is at once a 503 [code] with [message] and `Retry-After`; nobody waits.
  */
-private suspend inline fun <T> ApplicationCall.withUploadPermit(uploads: Semaphore, block: () -> T): T {
-    if (!uploads.tryAcquire()) {
-        response.header(HttpHeaders.RetryAfter, UPLOADS_BUSY_RETRY_SECONDS.toString())
-        throw ApiException(HttpStatusCode.ServiceUnavailable, "UPLOADS_BUSY", "Too many uploads, try again shortly")
+private suspend inline fun <T> ApplicationCall.withPermit(
+    permits: Semaphore,
+    code: String,
+    message: String,
+    block: () -> T,
+): T {
+    if (!permits.tryAcquire()) {
+        response.header(HttpHeaders.RetryAfter, BUSY_RETRY_SECONDS.toString())
+        throw ApiException(HttpStatusCode.ServiceUnavailable, code, message)
     }
     try {
         return block()
     } finally {
-        uploads.release()
+        permits.release()
     }
 }
+
+private suspend inline fun <T> ApplicationCall.withUploadPermit(uploads: Semaphore, block: () -> T): T =
+    withPermit(uploads, "UPLOADS_BUSY", "Too many uploads, try again shortly", block)
+
+private suspend inline fun <T> ApplicationCall.withDownloadPermit(downloads: Semaphore, block: () -> T): T =
+    withPermit(downloads, "DOWNLOADS_BUSY", "Too many downloads, try again shortly", block)
 
 /** The `{id}` path parameter as a file id; anything but a UUID names no file (404). */
 private fun ApplicationCall.fileId(): UUID =
@@ -114,19 +126,22 @@ private suspend fun ApplicationCall.requireFile(files: FileRepository, spaces: S
 /**
  * Files: upload (multipart, field `file`, at most `MAX_UPLOAD_BYTES`), download and delete. The type comes from the
  * bytes ([ContentSniffer]), never from the name or header; anything else is a 415. A file the caller may not see is a
- * 404, the same as a missing one. Uploads count against [SENSITIVE_LIMIT], and at most [maxConcurrentUploads] run at
- * once (see [withUploadPermit]).
+ * 404, the same as a missing one. Uploads and deletions count against [SENSITIVE_LIMIT], and at most
+ * [maxConcurrentUploads] uploads and [maxConcurrentDownloads] downloads run at once (see [withPermit]); a download
+ * takes its permit only once the file is found, so a 404 never holds one. A deletion writes an audit line.
  */
 fun Route.fileRoutes(
     files: FileRepository,
     store: FileStore,
     maxUploadBytes: Long,
     maxConcurrentUploads: Int,
+    maxConcurrentDownloads: Int,
     // cmpose:sharing
     spaces: SpaceRepository,
     // /cmpose:sharing
 ) {
     val uploads = Semaphore(maxConcurrentUploads)
+    val downloads = Semaphore(maxConcurrentDownloads)
     // cmpose:sharing-off: // Each file belongs to the user who uploaded it; another user's file is a 404.
     // A file belongs to a space, named by the upload's `spaceId` field (else the personal space): EDITOR uploads.
     rateLimit(SENSITIVE_LIMIT) {
@@ -161,19 +176,26 @@ fun Route.fileRoutes(
         call.requireUser()
         // cmpose:sharing-off: val stored = files.get(call.fileId(), user) ?: notFound()
         val stored = call.requireFile(files, spaces, Role.VIEWER)
-        val bytes = store.read(stored.path) ?: notFound()
-        // Downloaded, never rendered in a browser tab; the type is the sniffed one from the database.
-        call.response.header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.toString())
-        call.respondBytes(bytes, ContentType.parse(stored.mime))
+        call.withDownloadPermit(downloads) {
+            val bytes = store.read(stored.path) ?: notFound()
+            // Downloaded, never rendered in a browser tab; the type is the sniffed one from the database.
+            call.response.header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.toString())
+            call.respondBytes(bytes, ContentType.parse(stored.mime))
+        }
     }
-    delete("/api/v1/files/{id}") {
-        // cmpose:sharing-off: val user = call.requireUser()
-        call.requireUser()
-        // cmpose:sharing-off: val stored = files.get(call.fileId(), user) ?: notFound()
-        val stored = call.requireFile(files, spaces, Role.EDITOR)
-        // cmpose:sharing-off: if (files.delete(stored.id, user)) call.removeFiles(store, listOf(stored.path))
-        if (files.delete(stored.id)) call.removeFiles(store, listOf(stored.path))
-        call.respond(HttpStatusCode.NoContent)
+    rateLimit(SENSITIVE_LIMIT) {
+        delete("/api/v1/files/{id}") {
+            // cmpose:sharing-off: val user = call.requireUser()
+            call.requireUser()
+            // cmpose:sharing-off: val stored = files.get(call.fileId(), user) ?: notFound()
+            val stored = call.requireFile(files, spaces, Role.EDITOR)
+            // cmpose:sharing-off: if (files.delete(stored.id, user)) {
+            if (files.delete(stored.id)) {
+                call.removeFiles(store, listOf(stored.path))
+                call.application.log.info("File deleted")
+            }
+            call.respond(HttpStatusCode.NoContent)
+        }
     }
 }
 

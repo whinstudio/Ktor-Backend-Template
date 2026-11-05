@@ -7,6 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class AppConfigTest {
     private val required = mapOf(
@@ -54,6 +55,7 @@ class AppConfigTest {
         assertEquals(120, config.rateLimitPerMinute)
         assertEquals(10_485_760L, config.maxUploadBytes)
         assertEquals(4, config.maxConcurrentUploads)
+        assertEquals(8, config.maxConcurrentDownloads)
         assertNull(config.minClientVersion)
         assertEquals("dev", config.appVersion)
     }
@@ -100,5 +102,87 @@ class AppConfigTest {
     fun corsListParsed() {
         val config = AppConfig.fromEnv(required + ("CORS_ALLOWED_ORIGINS" to "https://a.test, https://b.test"))
         assertEquals(listOf("https://a.test", "https://b.test"), config.corsAllowedOrigins)
+    }
+
+    @Test
+    fun signInProvidersDefault() {
+        val config = AppConfig.fromEnv(required)
+        assertEquals(listOf("password", "google.com", "apple.com"), config.allowedSignInProviders)
+    }
+
+    @Test
+    fun signInProvidersParsed() {
+        val config = AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to "password, phone"))
+        assertEquals(listOf("password", "phone"), config.allowedSignInProviders)
+    }
+
+    /** A comma-only value counts as unset: never "allow nothing", never "allow everything". */
+    @Test
+    fun signInProvidersCommaOnlyIsDefault() {
+        val config = AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to " , "))
+        assertEquals(listOf("password", "google.com", "apple.com"), config.allowedSignInProviders)
+    }
+
+    @Test
+    fun malformedSignInProviderIsRejected() {
+        for (value in listOf("Google.com", "google com")) {
+            val error = assertFailsWith<ConfigException> {
+                AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to value))
+            }
+            assertEquals(listOf("ALLOWED_SIGN_IN_PROVIDERS"), error.invalid, "value $value")
+            assertFalse(value in error.message.orEmpty(), "the value itself stays out of the message")
+        }
+    }
+
+    @Test
+    fun identityPlatformProviderIdsAreAccepted() {
+        // OIDC and SAML provider ids may hold hyphens and underscores.
+        val value = "password, oidc.my-idp, saml.acme_sso"
+        val config = AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to value))
+        assertEquals(listOf("password", "oidc.my-idp", "saml.acme_sso"), config.allowedSignInProviders)
+    }
+
+    @Test
+    fun badMaxConcurrentDownloadsIsReportedByName() = assertReportedByName("MAX_CONCURRENT_DOWNLOADS", "0", "-3", "many")
+
+    @Test
+    fun badTrustedProxyIsReportedByName() = assertReportedByName("TRUSTED_PROXIES", "10.0.0.0/33", "not-an-ip")
+
+    @Test
+    fun badMinClientVersionIsReportedByName() = assertReportedByName("MIN_CLIENT_VERSION", "1.2", "v1.2.3")
+
+    @Test
+    fun badCorsOriginIsReportedByName() = assertReportedByName(
+        "CORS_ALLOWED_ORIGINS",
+        "example.com",
+        "https://a.com/",
+        "https://a.com/x",
+        "ftp://a.com",
+        "https://a.com?x=1",
+        "https://user@a.com",
+        "https://a.com#x",
+    )
+
+    @Test
+    fun goodProxyVersionAndCorsValuesStillLoad() {
+        val config = AppConfig.fromEnv(
+            required + mapOf(
+                "TRUSTED_PROXIES" to "10.0.0.0/8, 192.168.1.1",
+                "MIN_CLIENT_VERSION" to "2.0.0",
+                "CORS_ALLOWED_ORIGINS" to "https://app.example.com, http://localhost:3000",
+            )
+        )
+        assertEquals(listOf("10.0.0.0/8", "192.168.1.1"), config.trustedProxies)
+        assertEquals("2.0.0", config.minClientVersion)
+        assertEquals(listOf("https://app.example.com", "http://localhost:3000"), config.corsAllowedOrigins)
+    }
+
+    private fun assertReportedByName(name: String, vararg values: String) {
+        for (value in values) {
+            val error = assertFailsWith<ConfigException>("value $value") { AppConfig.fromEnv(required + (name to value)) }
+            assertEquals(listOf(name), error.invalid, "value $value")
+            assertTrue(name in error.message.orEmpty(), "value $value")
+            assertFalse(value in error.message.orEmpty(), "the value itself stays out of the message")
+        }
     }
 }

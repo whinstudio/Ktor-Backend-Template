@@ -37,7 +37,8 @@ object TestKeys {
     /**
      * A Firebase-shaped ID token. [iss] defaults to this project's securetoken issuer; [alg] is `RS256` (signed with
      * [signWith]), `none` (unsigned) or `HS256` (an HMAC secret, the classic key-confusion attempt). An [email] comes
-     * with `email_verified` set to [emailVerified].
+     * with `email_verified` set to [emailVerified]. A non-null [signInProvider] is written as the `firebase` claim's
+     * `sign_in_provider`; null leaves the `firebase` claim out.
      */
     fun token(
         sub: String = "u1",
@@ -49,6 +50,7 @@ object TestKeys {
         email: String? = null,
         emailVerified: Boolean = true,
         signWith: PrivateKey = keyPair.private,
+        signInProvider: String? = "password",
     ): String {
         val now = System.currentTimeMillis()
         val algorithm = when (alg) {
@@ -66,6 +68,7 @@ object TestKeys {
             .withClaim("auth_time", (now - 1_000) / 1_000)
             .withExpiresAt(Date(now + expiresInSec * 1_000))
             .apply { if (email != null) withClaim("email", email).withClaim("email_verified", emailVerified) }
+            .apply { if (signInProvider != null) withClaim("firebase", mapOf("sign_in_provider" to signInProvider)) }
             .sign(algorithm)
     }
 }

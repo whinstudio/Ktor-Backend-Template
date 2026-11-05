@@ -8,6 +8,8 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
 ## Access
 
 1. Every route calls `call.requireUser()` before it reads the body or looks anything up. No token, or a bad one, is 401.
+1. Only the sign-in methods listed in `ALLOWED_SIGN_IN_PROVIDERS` get an account; any other (anonymous by default) is
+   401.
 <!-- cmpose:sharing -->
 1. A route on a space's data calls `call.requireRole(spaces, spaceId, Role.VIEWER)` to read and `Role.EDITOR` to
    write, then uses the returned `membership.spaceId`, never the raw parameter. For a row looked up by id, load it
@@ -75,7 +77,8 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
 
 1. A costly or security-sensitive route (upload, deletion, invitations, anything sign-in-like) runs under
    `rateLimit(SENSITIVE_LIMIT)` and writes an audit log line without personal data. A route that holds a large body in
-   memory also caps how many run at once (as uploads do with `MAX_CONCURRENT_UPLOADS`).
+   memory also caps how many run at once (as uploads and downloads do with `MAX_CONCURRENT_UPLOADS` and
+   `MAX_CONCURRENT_DOWNLOADS`).
 1. A change that must happen once (a payment, a counter, a single-use token) is idempotent and safe under races: check
    and change in one transaction with `SELECT … FOR UPDATE`, or in one conditional `UPDATE`.
 1. A new write path that adds to something a quota counts checks the quota in the same locked transaction as the

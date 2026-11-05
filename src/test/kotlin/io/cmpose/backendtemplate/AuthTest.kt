@@ -7,6 +7,7 @@ import ch.qos.logback.core.read.ListAppender
 import com.auth0.jwk.Jwk
 import com.auth0.jwk.JwkProvider
 import com.auth0.jwk.NetworkException
+import io.cmpose.backendtemplate.config.AppConfig
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
@@ -38,7 +39,11 @@ class AuthTest {
 
     private class Outcome(val response: HttpResponse, val body: String, val warnings: List<String>)
 
-    private fun call(token: String?, jwkProvider: JwkProvider = TestKeys.jwkProvider): Outcome {
+    private fun call(
+        token: String?,
+        jwkProvider: JwkProvider = TestKeys.jwkProvider,
+        config: AppConfig = testConfig(),
+    ): Outcome {
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         root.addAppender(appender)
@@ -46,7 +51,7 @@ class AuthTest {
         lateinit var body: String
         try {
             testApplication {
-                application { module(authDeps(jwkProvider)) }
+                application { module(authDeps(jwkProvider, config)) }
                 response = client.me(token)
                 body = response.bodyAsText()
             }
@@ -121,6 +126,30 @@ class AuthTest {
 
     @Test
     fun emptySubIs401() = assertRejected(TestKeys.token(sub = ""), "no subject")
+
+    @Test
+    fun `an allowed sign-in provider gets in`() {
+        for (provider in listOf("password", "google.com", "apple.com")) {
+            val outcome = call(TestKeys.token(signInProvider = provider))
+            assertEquals(HttpStatusCode.OK, outcome.response.status, provider)
+            assertTrue(outcome.warnings.none { it.startsWith("Token rejected") }, provider)
+        }
+    }
+
+    @Test
+    fun `an anonymous token is refused`() =
+        assertRejected(TestKeys.token(signInProvider = "anonymous"), "sign-in provider not allowed: anonymous")
+
+    @Test
+    fun `a token without a sign-in provider is refused`() =
+        assertRejected(TestKeys.token(signInProvider = null), "no sign-in provider")
+
+    @Test
+    fun `a provider added to the allow-list gets in`() {
+        val config = testConfig().let { it.copy(allowedSignInProviders = it.allowedSignInProviders + "phone") }
+        val outcome = call(TestKeys.token(signInProvider = "phone"), config = config)
+        assertEquals(HttpStatusCode.OK, outcome.response.status)
+    }
 
     @Test
     fun foreignSignatureIs401() {

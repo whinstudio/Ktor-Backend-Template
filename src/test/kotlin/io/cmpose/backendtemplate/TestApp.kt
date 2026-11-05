@@ -21,6 +21,7 @@ fun testConfig(appVersion: String = "test-1") = AppConfig(
     maxJsonBytes = 1_048_576L,
     maxUploadBytes = 10_485_760L,
     maxConcurrentUploads = 4,
+    maxConcurrentDownloads = 8,
     minClientVersion = null,
     // Quotas off (0); a quota test turns its own on with copy(...).
     maxStorageBytesPerUser = 0L,
@@ -32,6 +33,7 @@ fun testConfig(appVersion: String = "test-1") = AppConfig(
     // /cmpose:sharing
     publicBaseUrl = null,
     jwtClockSkewSeconds = 60L,
+    allowedSignInProviders = listOf("password", "google.com", "apple.com"),
     dbPoolSize = 5,
     appVersion = appVersion,
 )

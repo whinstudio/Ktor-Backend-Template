@@ -1,8 +1,11 @@
 package io.cmpose.backendtemplate
 
+import io.cmpose.backendtemplate.files.FileRepository
 import io.cmpose.backendtemplate.files.FileStore
 import io.cmpose.backendtemplate.files.LocalDiskFileStore
+import io.cmpose.backendtemplate.files.StoredFile
 import io.cmpose.backendtemplate.files.StoredFiles
+import io.cmpose.backendtemplate.plugins.ApiException
 import io.cmpose.backendtemplate.sharing.Role
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -44,6 +47,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -62,12 +66,14 @@ class FileRoutesTest {
     private fun withApp(
         maxUploadBytes: Long = 10_485_760L,
         maxStorageBytesPerUser: Long = 0L,
+        rateLimitSensitivePerMinute: Int = testConfig().rateLimitSensitivePerMinute,
         block: suspend ApplicationTestBuilder.(HttpClient) -> Unit,
     ) = testApplication {
         val config = testConfig().copy(
             filesDir = dir.toString(),
             maxUploadBytes = maxUploadBytes,
             maxStorageBytesPerUser = maxStorageBytesPerUser,
+            rateLimitSensitivePerMinute = rateLimitSensitivePerMinute,
         )
         application { module(authDeps(config = config)) }
         block(jsonClient())
@@ -161,6 +167,27 @@ class FileRoutesTest {
     }
 
     @Test
+    fun fileDeletionIsRateLimited() = withApp(rateLimitSensitivePerMinute = 2) { client ->
+        val statuses = List(3) { client.delete("/api/v1/files/${UUID.randomUUID()}") { bearerAuth(alice) }.status }
+        assertEquals(List(2) { HttpStatusCode.NotFound } + HttpStatusCode.TooManyRequests, statuses)
+    }
+
+    /** The message alone: the request's own MDC already carries its path, request id and user id. */
+    @Test
+    fun deletingAFileWritesAnAuditLine() {
+        val messages = capturedLogs {
+            withApp { client ->
+                val id = client.upload(alice).body<Uploaded>().id
+                assertEquals(HttpStatusCode.NoContent, client.delete("/api/v1/files/$id") { bearerAuth(alice) }.status)
+                // Already gone: no row removed, no second audit line.
+                assertEquals(HttpStatusCode.NotFound, client.delete("/api/v1/files/$id") { bearerAuth(alice) }.status)
+            }
+        }.map { it.formattedMessage }
+        val audit = messages.filter { it.startsWith("File deleted") }
+        assertEquals(listOf("File deleted"), audit, messages.joinToString("\n"))
+    }
+
+    @Test
     fun withoutTokenIs401() = withApp { client ->
         val response = client.post("/api/v1/files")
         assertEquals(HttpStatusCode.Unauthorized, response.status)
@@ -222,6 +249,42 @@ class FileRoutesTest {
         }
         assertEquals(HttpStatusCode.Created, client.upload(bob).status)
         assertEquals(2L, rowCount())
+    }
+
+    @Test
+    fun downloadOverTheCapIs503DownloadsBusyWithRetryAfter() = testApplication {
+        val store = SlowReadStore(LocalDiskFileStore(dir))
+        val config = testConfig().copy(filesDir = dir.toString(), maxConcurrentDownloads = 1)
+        application { module(AppDeps(config, TestKeys.jwkProvider, TestDb.database, store)) }
+        val client = jsonClient()
+        val id = client.upload(alice).body<Uploaded>().id
+        store.gated = true
+        coroutineScope {
+            val first = async { client.get("/api/v1/files/$id") { bearerAuth(alice) } }
+            withTimeout(10.seconds) { store.entered.await() }
+            val busy = client.get("/api/v1/files/$id") { bearerAuth(alice) }
+            assertEquals(HttpStatusCode.ServiceUnavailable, busy.status)
+            assertEquals("DOWNLOADS_BUSY", busy.errorCode())
+            assertEquals("5", busy.headers[HttpHeaders.RetryAfter])
+            store.release.countDown()
+            assertEquals(HttpStatusCode.OK, first.await().status)
+        }
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/files/$id") { bearerAuth(alice) }.status)
+    }
+
+    @Test
+    fun missingFilesDoNotUseUpDownloadPermits() = testApplication {
+        val config = testConfig().copy(filesDir = dir.toString(), maxConcurrentDownloads = 1)
+        application { module(authDeps(config = config)) }
+        val client = jsonClient()
+        val id = client.upload(alice).body<Uploaded>().id
+        repeat(10) {
+            val missing = client.get("/api/v1/files/${UUID.randomUUID()}") { bearerAuth(alice) }
+            assertEquals(HttpStatusCode.NotFound, missing.status)
+        }
+        // Another user's file is a 404 too, and must not keep a permit either.
+        repeat(10) { assertEquals(HttpStatusCode.NotFound, client.get("/api/v1/files/$id") { bearerAuth(bob) }.status) }
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/files/$id") { bearerAuth(alice) }.status)
     }
 
     @Test
@@ -374,6 +437,29 @@ class FileRoutesTest {
         assertEquals(2L, rowCount())
     }
 
+    @Test
+    fun addingAFileToASpaceThatNoLongerExistsIsA404() = assertAddingToAMissingSpaceIs404(maxStorageBytesPerUser = 1000)
+
+    @Test
+    fun addingAFileToASpaceThatNoLongerExistsIsA404WithoutAQuota() =
+        assertAddingToAMissingSpaceIs404(maxStorageBytesPerUser = 0)
+
+    /** Adds a file row straight to a space that does not exist: a 404, and no row. */
+    private fun assertAddingToAMissingSpaceIs404(maxStorageBytesPerUser: Long) {
+        val files = FileRepository(TestDb.database, maxStorageBytesPerUser)
+        val file = StoredFile(
+            id = UUID.randomUUID(),
+            spaceId = UUID.randomUUID(),
+            uploadedBy = null,
+            path = "gone",
+            mime = "image/png",
+            size = 10,
+        )
+        val error = assertFailsWith<ApiException> { files.add(file) }
+        assertEquals(HttpStatusCode.NotFound, error.status)
+        assertEquals(0L, rowCount())
+    }
+
     // /cmpose:sharing
 
     /** Holds every write until [release] opens; [entered] completes once a write waits, i.e. an upload holds a permit. */
@@ -385,6 +471,21 @@ class FileRoutesTest {
             entered.complete(Unit)
             check(release.await(10, TimeUnit.SECONDS)) { "the gate never opened" }
             return inner.write(bytes)
+        }
+    }
+
+    /** Once [gated] is set, holds every read until [release] opens; [entered] completes once a read waits. */
+    private class SlowReadStore(private val inner: FileStore) : FileStore by inner {
+        @Volatile var gated = false
+        val entered = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+
+        override fun read(path: String): ByteArray? {
+            if (gated) {
+                entered.complete(Unit)
+                check(release.await(10, TimeUnit.SECONDS)) { "the gate never opened" }
+            }
+            return inner.read(path)
         }
     }
 

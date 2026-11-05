@@ -6,9 +6,12 @@ import io.cmpose.backendtemplate.auth.requireUser
 import io.cmpose.backendtemplate.files.FileStore
 import io.cmpose.backendtemplate.files.removeFiles
 import io.cmpose.backendtemplate.plugins.FieldError
+import io.cmpose.backendtemplate.plugins.SENSITIVE_LIMIT
 import io.cmpose.backendtemplate.plugins.badRequest
 import io.cmpose.backendtemplate.plugins.notFound
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.log
+import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -37,15 +40,12 @@ internal fun spaceName(name: String, field: String = "name"): String {
 /**
  * List, create, rename and delete spaces. Any signed-in user lists theirs and creates one; only an OWNER renames or
  * deletes it. A personal space cannot be deleted. Deleting a space takes its members, invites and files with it.
+ * Creating and deleting count against [SENSITIVE_LIMIT], and a deletion writes an audit line; listing and renaming
+ * only count against the global limit.
  */
 fun Route.spaceRoutes(spaces: SpaceRepository, store: FileStore) {
     get("/api/v1/spaces") {
         call.respond(spaces.listFor(call.requireUser()))
-    }
-    post("/api/v1/spaces") {
-        val user = call.requireUser()
-        val name = spaceName(call.receive<SpaceDraft>().name)
-        call.respond(HttpStatusCode.Created, spaces.create(user, name))
     }
     patch("/api/v1/spaces/{id}") {
         val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
@@ -53,10 +53,18 @@ fun Route.spaceRoutes(spaces: SpaceRepository, store: FileStore) {
         spaces.rename(membership.spaceId, name)
         call.respond(spaces.get(membership.spaceId, membership.userId) ?: notFound())
     }
-    delete("/api/v1/spaces/{id}") {
-        val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
-        if (spaces.isPersonal(membership.spaceId)) badRequest("A personal space cannot be deleted")
-        call.removeFiles(store, spaces.delete(membership.spaceId))
-        call.respond(HttpStatusCode.NoContent)
+    rateLimit(SENSITIVE_LIMIT) {
+        post("/api/v1/spaces") {
+            val user = call.requireUser()
+            val name = spaceName(call.receive<SpaceDraft>().name)
+            call.respond(HttpStatusCode.Created, spaces.create(user, name))
+        }
+        delete("/api/v1/spaces/{id}") {
+            val membership = call.requireRole(spaces, call.parameters["id"].orEmpty(), Role.OWNER)
+            if (spaces.isPersonal(membership.spaceId)) badRequest("A personal space cannot be deleted")
+            call.removeFiles(store, spaces.delete(membership.spaceId))
+            call.application.log.info("Space deleted")
+            call.respond(HttpStatusCode.NoContent)
+        }
     }
 }

@@ -25,6 +25,11 @@ services:
       timeout: 3s
       retries: 5
       start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # No published ports: nginx reaches the app on `proxy`, the app reaches Postgres (host `postgres`) on `db`.
     networks:
       - proxy

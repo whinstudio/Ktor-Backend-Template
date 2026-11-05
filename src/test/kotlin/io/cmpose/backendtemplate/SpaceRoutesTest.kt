@@ -11,6 +11,7 @@ import io.cmpose.backendtemplate.sharing.SpaceMembers
 import io.cmpose.backendtemplate.sharing.SpaceRepository
 import io.cmpose.backendtemplate.sharing.SpaceResponse
 import io.cmpose.backendtemplate.sharing.Spaces
+import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserRepository
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -106,6 +107,22 @@ class SpaceRoutesTest {
         assertEquals(Role.VIEWER, beta.role)
         assertEquals(2, beta.memberCount)
         assertFalse(beta.personal)
+    }
+
+    @Test
+    fun listIsBoundedInTheDatabaseKeepingItsOrder() = withApp { client ->
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val repository = SpaceRepository(TestDb.database)
+        listOf("b", "A", "c", "D").forEach { repository.create(aliceId, it) }
+        assertEquals(
+            listOf(PERSONAL_SPACE_NAME, "A", "b"),
+            repository.listFor(aliceId, limit = 3).map { it.name },
+        )
+        // Fewer spaces than MAX_LISTED_SPACES: the default call lists every one of them.
+        assertEquals(
+            listOf(PERSONAL_SPACE_NAME, "A", "b", "c", "D"),
+            repository.listFor(aliceId).map { it.name },
+        )
     }
 
     @Test
@@ -227,6 +244,43 @@ class SpaceRoutesTest {
             )
             responses.single { it.status == HttpStatusCode.Conflict }.assertQuotaExceeded("spaces")
             assertEquals(1, ownedSharedSpacesOf(client.userId(alice)))
+        }
+    }
+
+    @Test
+    fun spaceCreationIsRateLimited() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 2)) { client ->
+        repeat(2) { client.createSpace(alice, "Trip $it") }
+        val third = client.post("/api/v1/spaces") { jsonBody(alice, SpaceDraft("Third")) }
+        assertEquals(HttpStatusCode.TooManyRequests, third.status)
+        // Listing and renaming stay on the global limiter.
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/spaces") { bearerAuth(alice) }.status)
+        val id = client.spaces(alice).first { !it.personal }.id
+        val renamed = client.patch("/api/v1/spaces/$id") { jsonBody(alice, SpaceDraft("Renamed")) }
+        assertEquals(HttpStatusCode.OK, renamed.status)
+    }
+
+    @Test
+    fun spaceDeletionIsRateLimited() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 2)) { client ->
+        val statuses = List(3) { client.delete("/api/v1/spaces/${UUID.randomUUID()}") { bearerAuth(alice) }.status }
+        assertEquals(List(2) { HttpStatusCode.NotFound } + HttpStatusCode.TooManyRequests, statuses)
+    }
+
+    @Test
+    fun deletingASpaceWritesAnAuditLine() {
+        val email = "alice@example.com"
+        val name = "Secret Trip"
+        val logs = capturedLogs {
+            withApp { client ->
+                val owner = TestKeys.token(sub = "alice", email = email)
+                val space = client.createSpace(owner, name)
+                val deleted = client.delete("/api/v1/spaces/${space.id}") { bearerAuth(owner) }
+                assertEquals(HttpStatusCode.NoContent, deleted.status)
+            }
+        }.map { it.fullText() }
+        assertTrue(logs.any { it.startsWith("Space deleted") }, logs.joinToString("\n"))
+        logs.forEach { line ->
+            assertFalse(line.contains(name), "log leaks the space name: $line")
+            assertFalse(line.contains(email), "log leaks the email: $line")
         }
     }
 }

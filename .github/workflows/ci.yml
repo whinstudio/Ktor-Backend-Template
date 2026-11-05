@@ -35,7 +35,7 @@ jobs:
       # The gitleaks CLI in its own container: the whole git history, findings redacted, no licence needed.
       - name: gitleaks (git history)
         run: >-
-          docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo zricethezav/gitleaks:v8.24.0
+          docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo zricethezav/gitleaks:v8.24.0@sha256:2bcceac45179b3a91bff11a824d0fb952585b429e54fc928728b1d4d5c3e5176
           detect --source . --redact --verbose
 
   dependency-scan:

@@ -148,7 +148,8 @@ private fun JsonObjectBuilder.filePaths() {
     putJsonObject("/files") {
         put("post", operation("Uploads a JPEG, PNG, WebP or PDF file; the type is read from the bytes", form) {
             returns(Created, "Stored", schema("File"))
-            fails(BadRequest, Unauthorized, PayloadTooLarge, UnsupportedMediaType, TooManyRequests, ServiceUnavailable)
+            fails(BadRequest, Unauthorized, PayloadTooLarge, UnsupportedMediaType, Conflict, TooManyRequests)
+            fails(ServiceUnavailable)
             // cmpose:sharing
             fails(NotFound)
             // /cmpose:sharing
@@ -160,14 +161,17 @@ private fun JsonObjectBuilder.filePaths() {
             putJsonObject(OK.value.toString()) {
                 put("description", "The file's bytes")
                 putJsonObject("content") {
-                    putJsonObject("application/octet-stream") { put("schema", string("binary")) }
+                    // The types ContentSniffer lets in; a file is served as the type stored with it.
+                    listOf("image/jpeg", "image/png", "image/webp", "application/pdf").forEach { type ->
+                        putJsonObject(type) { put("schema", string("binary")) }
+                    }
                 }
             }
-            fails(Unauthorized, NotFound)
+            fails(Unauthorized, NotFound, ServiceUnavailable)
         })
         put("delete", operation("Deletes a file") {
             returns(NoContent, "Deleted")
-            fails(Unauthorized, NotFound)
+            fails(Unauthorized, NotFound, TooManyRequests)
         })
     }
 }
@@ -220,13 +224,13 @@ private fun JsonObjectBuilder.accountSchemas() {
 // cmpose:sharing
 private fun JsonObjectBuilder.sharingPaths() {
     putJsonObject("/spaces") {
-        put("get", operation("The caller's spaces, with their role in each") {
+        put("get", operation("The caller's spaces, with their role in each, at most 200") {
             returns(OK, "The spaces", arrayOf(schema("Space")))
             fails(Unauthorized)
         })
         put("post", operation("Creates a space with the caller as its OWNER", jsonBody(schema("SpaceDraft"))) {
             returns(Created, "Created", schema("Space"))
-            fails(BadRequest, Unauthorized)
+            fails(BadRequest, Unauthorized, Conflict, TooManyRequests)
         })
     }
     putJsonObject("/spaces/{id}") {
@@ -238,7 +242,7 @@ private fun JsonObjectBuilder.sharingPaths() {
         // cmpose:sample-off: put("delete", operation("Deletes a space with its members, invites and files (OWNER)") {
         put("delete", operation("Deletes a space with its members, invites, files and items (OWNER)") {
             returns(NoContent, "Deleted")
-            fails(BadRequest, Unauthorized, NotFound)
+            fails(BadRequest, Unauthorized, NotFound, TooManyRequests)
         })
     }
     putJsonObject("/spaces/{id}/members") {
@@ -274,7 +278,7 @@ private fun JsonObjectBuilder.sharingPaths() {
         })
         put("post", operation("Creates a single-use invite link (OWNER)", jsonBody(schema("InviteRequest"))) {
             returns(Created, "The invite; its token is shown only here", schema("Invite"))
-            fails(BadRequest, Unauthorized, NotFound, TooManyRequests)
+            fails(BadRequest, Unauthorized, NotFound, Conflict, TooManyRequests)
         })
     }
     putJsonObject("/spaces/{id}/invites/{inviteId}") {

@@ -52,7 +52,15 @@ class UnknownKidTest {
     }
 
     private fun verifier(jwks: JwkProvider, keySet: PublishedKeyIds? = null, clock: () -> Long) =
-        FirebaseTokenVerifier(jwks, TestKeys.PROJECT_ID, 60, Dispatchers.Unconfined, clock, keySet)
+        FirebaseTokenVerifier(
+            jwks,
+            TestKeys.PROJECT_ID,
+            60,
+            testConfig().allowedSignInProviders.toSet(),
+            Dispatchers.Unconfined,
+            clock,
+            keySet,
+        )
 
     @Test
     fun floodOfMadeUpKidsLooksUpOnceAndRealUsersStillGet200() = testApplication {
