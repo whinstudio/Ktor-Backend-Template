@@ -24,6 +24,21 @@ class OpenApiTest {
     private fun JsonObject.schema(name: String) =
         this["components"]!!.jsonObject["schemas"]!!.jsonObject[name]!!.jsonObject
     private fun JsonElement.strings() = jsonArray.map { it.jsonPrimitive.content }
+    private fun JsonObject.operation(path: String, method: String) =
+        this["paths"]!!.jsonObject[path]!!.jsonObject[method]!!.jsonObject
+    private fun JsonObject.responses(path: String, method: String) =
+        operation(path, method)["responses"]!!.jsonObject
+
+    private fun assertAnswers(path: String, method: String, vararg statuses: Int) {
+        val responses = OpenApi.document(null).responses(path, method)
+        statuses.forEach { status ->
+            val response = responses[status.toString()]
+            assertTrue(response != null, "no $status on $method $path")
+            if (status >= 409) {
+                assertEquals(JsonPrimitive("#/components/responses/Error"), response.jsonObject["\$ref"])
+            }
+        }
+    }
 
     @Test
     fun servedAsJsonWithThePublicBaseUrl() = testApplication {
@@ -113,7 +128,38 @@ class OpenApiTest {
         assertEquals(JsonPrimitive("string"), quota["type"])
     }
 
+    @Test
+    fun theFileRoutesDeclareQuotaRateLimitAndBusyAnswers() {
+        assertAnswers("/files", "post", 409)
+        assertAnswers("/files/{id}", "get", 503)
+        assertAnswers("/files/{id}", "delete", 429)
+    }
+
+    @Test
+    fun aDownloadListsTheStoredFileTypes() {
+        val content = OpenApi.document(null).responses("/files/{id}", "get")["200"]!!.jsonObject["content"]!!.jsonObject
+        assertEquals(setOf("image/jpeg", "image/png", "image/webp", "application/pdf"), content.keys)
+        content.values.forEach { media ->
+            val schema = media.jsonObject["schema"]!!.jsonObject
+            assertEquals(JsonPrimitive("string"), schema["type"])
+            assertEquals(JsonPrimitive("binary"), schema["format"])
+        }
+    }
+
     // cmpose:sharing
+    @Test
+    fun theSpaceRoutesDeclareQuotaAndRateLimitAnswers() {
+        assertAnswers("/spaces", "post", 409, 429)
+        assertAnswers("/spaces/{id}", "delete", 429)
+        assertAnswers("/spaces/{id}/invites", "post", 409)
+    }
+
+    @Test
+    fun theSpaceListSaysItsBound() {
+        val summary = OpenApi.document(null).operation("/spaces", "get")["summary"]!!.jsonPrimitive.content
+        assertTrue("at most 200" in summary, summary)
+    }
+
     @Test
     fun listsAndRevokesPendingInvites() {
         val paths = OpenApi.document(null)["paths"]!!.jsonObject
