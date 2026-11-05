@@ -55,6 +55,7 @@ class AppConfigTest {
         assertEquals(120, config.rateLimitPerMinute)
         assertEquals(10_485_760L, config.maxUploadBytes)
         assertEquals(4, config.maxConcurrentUploads)
+        assertEquals(8, config.maxConcurrentDownloads)
         assertNull(config.minClientVersion)
         assertEquals("dev", config.appVersion)
     }
@@ -132,6 +133,9 @@ class AppConfigTest {
             assertFalse(value in error.message.orEmpty(), "the value itself stays out of the message")
         }
     }
+
+    @Test
+    fun badMaxConcurrentDownloadsIsReportedByName() = assertReportedByName("MAX_CONCURRENT_DOWNLOADS", "0", "-3", "many")
 
     @Test
     fun badTrustedProxyIsReportedByName() = assertReportedByName("TRUSTED_PROXIES", "10.0.0.0/33", "not-an-ip")

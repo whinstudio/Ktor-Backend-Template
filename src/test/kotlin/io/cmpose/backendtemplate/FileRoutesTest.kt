@@ -252,6 +252,42 @@ class FileRoutesTest {
     }
 
     @Test
+    fun downloadOverTheCapIs503DownloadsBusyWithRetryAfter() = testApplication {
+        val store = SlowReadStore(LocalDiskFileStore(dir))
+        val config = testConfig().copy(filesDir = dir.toString(), maxConcurrentDownloads = 1)
+        application { module(AppDeps(config, TestKeys.jwkProvider, TestDb.database, store)) }
+        val client = jsonClient()
+        val id = client.upload(alice).body<Uploaded>().id
+        store.gated = true
+        coroutineScope {
+            val first = async { client.get("/api/v1/files/$id") { bearerAuth(alice) } }
+            withTimeout(10.seconds) { store.entered.await() }
+            val busy = client.get("/api/v1/files/$id") { bearerAuth(alice) }
+            assertEquals(HttpStatusCode.ServiceUnavailable, busy.status)
+            assertEquals("DOWNLOADS_BUSY", busy.errorCode())
+            assertEquals("5", busy.headers[HttpHeaders.RetryAfter])
+            store.release.countDown()
+            assertEquals(HttpStatusCode.OK, first.await().status)
+        }
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/files/$id") { bearerAuth(alice) }.status)
+    }
+
+    @Test
+    fun missingFilesDoNotUseUpDownloadPermits() = testApplication {
+        val config = testConfig().copy(filesDir = dir.toString(), maxConcurrentDownloads = 1)
+        application { module(authDeps(config = config)) }
+        val client = jsonClient()
+        val id = client.upload(alice).body<Uploaded>().id
+        repeat(10) {
+            val missing = client.get("/api/v1/files/${UUID.randomUUID()}") { bearerAuth(alice) }
+            assertEquals(HttpStatusCode.NotFound, missing.status)
+        }
+        // Another user's file is a 404 too, and must not keep a permit either.
+        repeat(10) { assertEquals(HttpStatusCode.NotFound, client.get("/api/v1/files/$id") { bearerAuth(bob) }.status) }
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/files/$id") { bearerAuth(alice) }.status)
+    }
+
+    @Test
     fun uploadWithinStorageQuotaPasses() = withApp(maxStorageBytesPerUser = 1000) { client ->
         assertEquals(HttpStatusCode.Created, client.upload(alice, pngOf(600)).status)
         // Exactly at the limit still passes: only going past it is refused.
@@ -435,6 +471,21 @@ class FileRoutesTest {
             entered.complete(Unit)
             check(release.await(10, TimeUnit.SECONDS)) { "the gate never opened" }
             return inner.write(bytes)
+        }
+    }
+
+    /** Once [gated] is set, holds every read until [release] opens; [entered] completes once a read waits. */
+    private class SlowReadStore(private val inner: FileStore) : FileStore by inner {
+        @Volatile var gated = false
+        val entered = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+
+        override fun read(path: String): ByteArray? {
+            if (gated) {
+                entered.complete(Unit)
+                check(release.await(10, TimeUnit.SECONDS)) { "the gate never opened" }
+            }
+            return inner.read(path)
         }
     }
 

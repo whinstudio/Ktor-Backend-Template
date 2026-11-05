@@ -94,8 +94,16 @@ fun Application.module(deps: AppDeps) {
         if (users != null && files != null && spaces != null) {
             // cmpose:sharing-off: userRoutes(users, files, deps.fileStore)
             userRoutes(users, files, deps.fileStore, spaces)
-            // cmpose:sharing-off: fileRoutes(files, deps.fileStore, config.maxUploadBytes, config.maxConcurrentUploads)
-            fileRoutes(files, deps.fileStore, config.maxUploadBytes, config.maxConcurrentUploads, spaces)
+            fileRoutes(
+                files,
+                deps.fileStore,
+                config.maxUploadBytes,
+                config.maxConcurrentUploads,
+                config.maxConcurrentDownloads,
+                // cmpose:sharing
+                spaces,
+                // /cmpose:sharing
+            )
             // cmpose:sample
             // cmpose:sharing-off: items?.let { itemRoutes(it) }
             items?.let { itemRoutes(it, spaces) }

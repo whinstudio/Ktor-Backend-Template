@@ -21,6 +21,7 @@ fun testConfig(appVersion: String = "test-1") = AppConfig(
     maxJsonBytes = 1_048_576L,
     maxUploadBytes = 10_485_760L,
     maxConcurrentUploads = 4,
+    maxConcurrentDownloads = 8,
     minClientVersion = null,
     // Quotas off (0); a quota test turns its own on with copy(...).
     maxStorageBytesPerUser = 0L,

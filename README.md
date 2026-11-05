@@ -65,8 +65,8 @@ and the tests.
 
   Codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE`,
   `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
-  `UPLOADS_BUSY`, `QUOTA_EXCEEDED` (409, with `quota` naming the limit reached: `storage`). A 500 carries no detail
-  beyond the request id.
+  `UPLOADS_BUSY`, `DOWNLOADS_BUSY`, `QUOTA_EXCEEDED` (409, with `quota` naming the limit reached: `storage`). A 500
+  carries no detail beyond the request id.
 <!-- cmpose:sharing -->
   With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
   (409, already used; also on revoking a used one), `INVITE_REVOKED` (410, revoked by an owner) and `INVITE_EXPIRED`

@@ -13,6 +13,7 @@ private const val DEFAULT_RATE_LIMIT_SENSITIVE_PER_MINUTE = 10
 private const val DEFAULT_MAX_JSON_BYTES = 1_048_576L
 private const val DEFAULT_MAX_UPLOAD_BYTES = 10_485_760L
 private const val DEFAULT_MAX_CONCURRENT_UPLOADS = 4
+private const val DEFAULT_MAX_CONCURRENT_DOWNLOADS = 8
 private const val DEFAULT_MAX_STORAGE_BYTES_PER_USER = 104_857_600L
 // cmpose:sharing
 private const val DEFAULT_INVITE_TTL_DAYS = 7
@@ -42,6 +43,7 @@ data class AppConfig(
     val maxJsonBytes: Long,
     val maxUploadBytes: Long,
     val maxConcurrentUploads: Int,
+    val maxConcurrentDownloads: Int,
     val minClientVersion: String?,
     // Quotas: 0 turns one off.
     val maxStorageBytesPerUser: Long,
@@ -65,6 +67,7 @@ data class AppConfig(
             "trustedProxies=$trustedProxies, rateLimitPerMinute=$rateLimitPerMinute, " +
             "rateLimitSensitivePerMinute=$rateLimitSensitivePerMinute, maxJsonBytes=$maxJsonBytes, " +
             "maxUploadBytes=$maxUploadBytes, maxConcurrentUploads=$maxConcurrentUploads, " +
+            "maxConcurrentDownloads=$maxConcurrentDownloads, " +
             "minClientVersion=$minClientVersion, maxStorageBytesPerUser=$maxStorageBytesPerUser, " +
             // cmpose:sharing
             "inviteTtlDays=$inviteTtlDays, maxSpacesPerUser=$maxSpacesPerUser, " +
@@ -96,6 +99,7 @@ data class AppConfig(
                     maxJsonBytes = long("MAX_JSON_BYTES", DEFAULT_MAX_JSON_BYTES),
                     maxUploadBytes = long("MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES),
                     maxConcurrentUploads = int("MAX_CONCURRENT_UPLOADS", DEFAULT_MAX_CONCURRENT_UPLOADS),
+                    maxConcurrentDownloads = int("MAX_CONCURRENT_DOWNLOADS", DEFAULT_MAX_CONCURRENT_DOWNLOADS),
                     minClientVersion = optional("MIN_CLIENT_VERSION") { ClientVersion.parse(it) != null },
                     maxStorageBytesPerUser =
                     long("MAX_STORAGE_BYTES_PER_USER", DEFAULT_MAX_STORAGE_BYTES_PER_USER, 0L..Long.MAX_VALUE),
