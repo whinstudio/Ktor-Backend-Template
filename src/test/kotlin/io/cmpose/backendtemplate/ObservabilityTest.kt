@@ -70,6 +70,17 @@ class ObservabilityTest {
         assertEquals("/api/v1/invites/{token}/accept", redactedPath("/api/v1/invites/t1/accept"))
         assertEquals("/api/v1/spaces/abc/members/{userId}", redactedPath("/api/v1/spaces/abc/members/u1"))
         assertEquals("/api/v1/spaces/abc/members", redactedPath("/api/v1/spaces/abc/members"))
+        assertEquals("/api/v1/invites/preview", redactedPath("/api/v1/invites/preview"))
+        assertEquals("/api/v1/invites/accept", redactedPath("/api/v1/invites/accept"))
+        val spaceId = "0b6f3c1e-8a52-4d7b-9f0e-2c4d6e8a1b3c"
+        assertEquals(
+            "/api/v1/spaces/$spaceId/invites/{token}",
+            redactedPath("/api/v1/spaces/$spaceId/invites/5e7a9c2b-1d3f-4a6b-8c0e-7f9a1b3d5c7e"),
+        )
+        assertEquals(
+            "/api/v1/spaces/$spaceId/members/{userId}",
+            redactedPath("/api/v1/spaces/$spaceId/members/u-123"),
+        )
         // /cmpose:sharing
         assertEquals("/api/v1/files/abc", redactedPath("/api/v1/files/abc"))
         assertEquals("/health", redactedPath("/health"))

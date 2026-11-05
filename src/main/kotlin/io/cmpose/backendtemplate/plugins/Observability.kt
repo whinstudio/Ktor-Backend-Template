@@ -38,11 +38,20 @@ private val REDACTED_AFTER = mapOf<String, String>(
     // /cmpose:sharing
 )
 
-/** [path] as the request log shows it: secrets and user ids replaced with placeholders. */
+// Route names that follow one of the keys above: kept as they are, never redacted.
+private val KEPT_AFTER = mapOf<String, Set<String>>(
+    // cmpose:sharing
+    "invites" to setOf("preview", "accept"),
+    // /cmpose:sharing
+)
+
+/** [path] as the request log shows it: secrets and user ids replaced with placeholders, route names kept. */
 internal fun redactedPath(path: String): String {
     val segments = path.split('/').toMutableList()
     for (i in 1 until segments.size) {
-        REDACTED_AFTER[segments[i - 1]]?.let { segments[i] = it }
+        val key = segments[i - 1]
+        if (KEPT_AFTER[key]?.contains(segments[i]) == true) continue
+        REDACTED_AFTER[key]?.let { segments[i] = it }
     }
     return segments.joinToString("/")
 }
