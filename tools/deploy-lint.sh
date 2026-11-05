@@ -57,6 +57,14 @@ has "$compose" "cap_drop" "needs cap_drop"
 has_re "$compose" 'healthcheck:' "needs a healthcheck"
 has_re "$compose" '127\.0\.0\.1:8080/ready' "the healthcheck must probe /ready"
 lacks_re "$compose" '^[[:space:]]*ports:' "must not publish ports"
+# Bounded container logs: a json-file driver with rotation, so a noisy app cannot fill the server's disk.
+awk '
+    /^[[:space:]]*logging:/ { inside = 1; indent = match($0, /[^[:space:]]/); next }
+    inside && /^[[:space:]]*[^[:space:]#]/ && match($0, /[^[:space:]]/) <= indent { inside = 0 }
+    inside && /max-size:/ { size = 1 }
+    inside && /max-file:/ { files = 1 }
+    END { exit (size && files) ? 0 : 1 }
+' "$compose" || fail "$compose: needs logging: with max-size and max-file"
 has "$compose" "env_file: ./apps/$app.env" "needs env_file: ./apps/$app.env"
 has "$compose" "image: ghcr.io/\${IMAGE_OWNER}/$app:\${IMAGE_TAG:-latest}" "needs the ghcr image reference"
 for network in proxy db; do

@@ -27,6 +27,8 @@ All values below (`<owner>`, `<domain>`, passwords, project ids) are placeholder
   on the server, with a copy in the owner's password manager.
 - The top-level `.env` of the server repository sets `IMAGE_OWNER` (the GitHub owner, lower case) and optionally
   `IMAGE_TAG` and `CMPOSE_APP_MEM_LIMIT` (default `512m`).
+- The compose file caps the app's logs with Docker's `json-file` driver (`max-size: 10m`, `max-file: 3`), so they
+  never use more than about 30 MB of the server's disk.
 - The image is `ghcr.io/${IMAGE_OWNER}/cmpose-app:${IMAGE_TAG:-latest}`. CI pushes `:<short sha>`, `:latest` (from
   `develop`) and `:<tag>` (from `v*` tags). If the package is private, log the server in once with
   `docker login ghcr.io` and a read-only (`read:packages`) token.
