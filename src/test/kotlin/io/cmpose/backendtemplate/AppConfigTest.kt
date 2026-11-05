@@ -7,6 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class AppConfigTest {
     private val required = mapOf(
@@ -128,6 +129,47 @@ class AppConfigTest {
                 AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to value))
             }
             assertEquals(listOf("ALLOWED_SIGN_IN_PROVIDERS"), error.invalid, "value $value")
+            assertFalse(value in error.message.orEmpty(), "the value itself stays out of the message")
+        }
+    }
+
+    @Test
+    fun badTrustedProxyIsReportedByName() = assertReportedByName("TRUSTED_PROXIES", "10.0.0.0/33", "not-an-ip")
+
+    @Test
+    fun badMinClientVersionIsReportedByName() = assertReportedByName("MIN_CLIENT_VERSION", "1.2", "v1.2.3")
+
+    @Test
+    fun badCorsOriginIsReportedByName() = assertReportedByName(
+        "CORS_ALLOWED_ORIGINS",
+        "example.com",
+        "https://a.com/",
+        "https://a.com/x",
+        "ftp://a.com",
+        "https://a.com?x=1",
+        "https://user@a.com",
+        "https://a.com#x",
+    )
+
+    @Test
+    fun goodProxyVersionAndCorsValuesStillLoad() {
+        val config = AppConfig.fromEnv(
+            required + mapOf(
+                "TRUSTED_PROXIES" to "10.0.0.0/8, 192.168.1.1",
+                "MIN_CLIENT_VERSION" to "2.0.0",
+                "CORS_ALLOWED_ORIGINS" to "https://app.example.com, http://localhost:3000",
+            )
+        )
+        assertEquals(listOf("10.0.0.0/8", "192.168.1.1"), config.trustedProxies)
+        assertEquals("2.0.0", config.minClientVersion)
+        assertEquals(listOf("https://app.example.com", "http://localhost:3000"), config.corsAllowedOrigins)
+    }
+
+    private fun assertReportedByName(name: String, vararg values: String) {
+        for (value in values) {
+            val error = assertFailsWith<ConfigException>("value $value") { AppConfig.fromEnv(required + (name to value)) }
+            assertEquals(listOf(name), error.invalid, "value $value")
+            assertTrue(name in error.message.orEmpty(), "value $value")
             assertFalse(value in error.message.orEmpty(), "the value itself stays out of the message")
         }
     }

@@ -1,5 +1,10 @@
 package io.cmpose.backendtemplate.config
 
+import io.cmpose.backendtemplate.plugins.Cidr
+import io.cmpose.backendtemplate.plugins.ClientVersion
+import java.net.URI
+import java.net.URISyntaxException
+
 private const val DEFAULT_PORT = 8080
 private const val MAX_PORT = 65_535
 private const val DEFAULT_TRUSTED_PROXIES = "172.16.0.0/12"
@@ -18,6 +23,7 @@ private const val DEFAULT_MAX_PENDING_INVITES_PER_SPACE = 20
 private const val DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60L
 private const val DEFAULT_ALLOWED_SIGN_IN_PROVIDERS = "password,google.com,apple.com"
 private val SIGN_IN_PROVIDER = Regex("^[a-z0-9.]+$")
+private val CORS_SCHEMES = setOf("http", "https")
 private const val DEFAULT_DB_POOL_SIZE = 5
 private const val DEFAULT_APP_VERSION = "dev"
 
@@ -82,15 +88,15 @@ data class AppConfig(
                     databasePassword = required("DATABASE_PASSWORD"),
                     firebaseProjectId = required("FIREBASE_PROJECT_ID"),
                     filesDir = required("FILES_DIR"),
-                    corsAllowedOrigins = list("CORS_ALLOWED_ORIGINS", ""),
-                    trustedProxies = list("TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES),
+                    corsAllowedOrigins = list("CORS_ALLOWED_ORIGINS", "", ::isCorsOrigin),
+                    trustedProxies = list("TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES, ::isCidr),
                     rateLimitPerMinute = int("RATE_LIMIT_PER_MINUTE", DEFAULT_RATE_LIMIT_PER_MINUTE),
                     rateLimitSensitivePerMinute =
                     int("RATE_LIMIT_SENSITIVE_PER_MINUTE", DEFAULT_RATE_LIMIT_SENSITIVE_PER_MINUTE),
                     maxJsonBytes = long("MAX_JSON_BYTES", DEFAULT_MAX_JSON_BYTES),
                     maxUploadBytes = long("MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES),
                     maxConcurrentUploads = int("MAX_CONCURRENT_UPLOADS", DEFAULT_MAX_CONCURRENT_UPLOADS),
-                    minClientVersion = optional("MIN_CLIENT_VERSION"),
+                    minClientVersion = optional("MIN_CLIENT_VERSION") { ClientVersion.parse(it) != null },
                     maxStorageBytesPerUser =
                     long("MAX_STORAGE_BYTES_PER_USER", DEFAULT_MAX_STORAGE_BYTES_PER_USER, 0L..Long.MAX_VALUE),
                     // cmpose:sharing
@@ -117,7 +123,7 @@ data class AppConfig(
     }
 }
 
-/** The environment is incomplete: [missing] required variables are unset, [invalid] ones hold bad numbers. */
+/** The environment is incomplete: [missing] required variables are unset, [invalid] ones hold malformed values. */
 class ConfigException(val missing: List<String>, val invalid: List<String> = emptyList()) :
     IllegalStateException(describe(missing, invalid))
 
@@ -134,14 +140,23 @@ private class EnvReader(private val env: Map<String, String>) {
 
     fun optional(name: String): String? = env[name]?.trim()?.takeIf { it.isNotEmpty() }
 
+    /** Like [optional], but a value [valid] rejects is recorded as invalid and read as unset. */
+    fun optional(name: String, valid: (String) -> Boolean): String? {
+        val raw = optional(name) ?: return null
+        return raw.takeIf(valid) ?: null.also { invalid += name }
+    }
+
     fun required(name: String): String = optional(name) ?: "".also { missing += name }
 
     fun list(name: String, default: String): List<String> = split(optional(name) ?: default)
 
     /** A list whose every entry matches [entry]; one that holds no entry at all (e.g. " , ") counts as unset. */
-    fun list(name: String, default: String, entry: Regex): List<String> {
+    fun list(name: String, default: String, entry: Regex): List<String> = list(name, default, entry::matches)
+
+    /** A list whose every entry passes [valid]; one that holds no entry at all (e.g. " , ") counts as unset. */
+    fun list(name: String, default: String, valid: (String) -> Boolean): List<String> {
         val values = optional(name)?.let(::split)?.takeIf { it.isNotEmpty() } ?: return split(default)
-        return values.takeIf { all -> all.all(entry::matches) } ?: split(default).also { invalid += name }
+        return values.takeIf { all -> all.all(valid) } ?: split(default).also { invalid += name }
     }
 
     private fun split(raw: String) = raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
@@ -155,4 +170,28 @@ private class EnvReader(private val env: Map<String, String>) {
         val raw = optional(name) ?: return default
         return raw.toLongOrNull()?.takeIf { it in range } ?: default.also { invalid += name }
     }
+}
+
+/** True when [text] is an IP address with an optional in-range prefix, as `TRUSTED_PROXIES` takes it. */
+private fun isCidr(text: String) = try {
+    Cidr.parse(text)
+    true
+} catch (_: IllegalArgumentException) {
+    false
+}
+
+/**
+ * True when [text] is a bare web origin: `http` or `https`, a host and an optional port, nothing else (no path, not
+ * even a trailing slash, no query, fragment or user info). `java.net.URI` because Ktor's `Url` reads `example.com`
+ * as a path on localhost instead of failing.
+ */
+private fun isCorsOrigin(text: String): Boolean {
+    val uri = try {
+        URI(text)
+    } catch (_: URISyntaxException) {
+        return false
+    }
+    return uri.scheme in CORS_SCHEMES && !uri.host.isNullOrEmpty() && uri.rawUserInfo == null &&
+        uri.rawPath.isNullOrEmpty() && uri.rawQuery == null && uri.rawFragment == null &&
+        (uri.port == -1 || uri.port in 1..MAX_PORT)
 }
