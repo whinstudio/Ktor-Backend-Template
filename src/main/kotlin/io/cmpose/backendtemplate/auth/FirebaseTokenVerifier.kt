@@ -13,6 +13,7 @@ import com.auth0.jwt.exceptions.JWTVerificationException
 import com.auth0.jwt.exceptions.MissingClaimException
 import com.auth0.jwt.exceptions.SignatureVerificationException
 import com.auth0.jwt.exceptions.TokenExpiredException
+import com.auth0.jwt.interfaces.DecodedJWT
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +27,9 @@ const val FIREBASE_PROVIDER = "firebase"
 
 private const val ALGORITHM = "RS256"
 private const val MILLIS_PER_SECOND = 1_000L
+
+// The longest sign-in provider id a refusal quotes; Firebase's own ids are far shorter.
+private const val MAX_LOGGED_PROVIDER_CHARS = 32
 
 /** How long after a lookup of an unknown `kid` the next one may reach the key provider. */
 internal const val UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS = 60_000L
@@ -42,8 +46,9 @@ internal fun rejectToken(reason: String): Nothing? {
 /**
  * Verifies Firebase ID tokens with Google's published securetoken keys ([jwks]): an RS256 signature by the key the
  * `kid` names, `iss` and `aud` bound to [projectId], `exp`/`iat`/`auth_time` with [leewaySeconds] of clock skew and a
- * non-empty `sub`. No Admin SDK, no service account. Every refusal is logged at WARN as "Token rejected: <reason>", so
- * a 401 on a device can be explained from the log.
+ * non-empty `sub` and a `firebase.sign_in_provider` in [allowedSignInProviders] (a token without one is refused, so
+ * anonymous, phone or custom sign-ins get no account unless listed). No Admin SDK, no service account. Every refusal
+ * is logged at WARN as "Token rejected: <reason>", so a 401 on a device can be explained from the log.
  *
  * A `kid` not yet seen in Google's key set may reach Google at most once per [UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS] (one
  * global slot, not one per kid); any other is refused as "unknown kid" without a lookup. So a flood of made-up kids
@@ -58,6 +63,7 @@ class FirebaseTokenVerifier(
     private val jwks: JwkProvider,
     private val projectId: String,
     private val leewaySeconds: Long,
+    private val allowedSignInProviders: Set<String>,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val now: () -> Long = System::currentTimeMillis,
     private val publishedKeyIds: PublishedKeyIds? = null,
@@ -75,14 +81,24 @@ class FirebaseTokenVerifier(
         } catch (e: JWTVerificationException) {
             return rejectToken(rejectionReason(e))
         }
-        val subject = jwt.subject?.takeIf { it.isNotBlank() } ?: return rejectToken("no subject")
+        claimsRefusal(jwt)?.let { return rejectToken(it) }
         return VerifiedIdentity(
             provider = FIREBASE_PROVIDER,
-            subject = subject,
+            subject = jwt.subject,
             email = jwt.getClaim("email").asString(),
             emailVerified = jwt.getClaim("email_verified").asBoolean() == true,
             name = jwt.getClaim("name").asString(),
         )
+    }
+
+    // Why a verified token still gets no account, or null when its subject and sign-in provider are acceptable.
+    private fun claimsRefusal(jwt: DecodedJWT): String? {
+        if (jwt.subject.isNullOrBlank()) return "no subject"
+        val signInProvider = jwt.getClaim("firebase").asMap()?.get("sign_in_provider") as? String
+            ?: return "no sign-in provider"
+        // One of Firebase's fixed ids, not personal data; capped in case a token carries something else.
+        return "sign-in provider not allowed: ${signInProvider.take(MAX_LOGGED_PROVIDER_CHARS)}"
+            .takeIf { signInProvider !in allowedSignInProviders }
     }
 
     // Checked before any key fetch, so `none`, HS256 and kid-less tokens never reach Google's endpoint.

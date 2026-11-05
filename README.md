@@ -112,7 +112,9 @@ and the tests.
 
 Every setting comes from the environment (`AppConfig`); the server refuses to start when a required one is missing or
 invalid, naming it. Required: `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`, `FIREBASE_PROJECT_ID`, `FILES_DIR`.
-`deploy/.env.example` lists the optional ones with their defaults.
+`deploy/.env.example` lists the optional ones with their defaults. Only the Firebase sign-in methods in
+`ALLOWED_SIGN_IN_PROVIDERS` (default `password,google.com,apple.com`) get an account; a token from any other method
+(anonymous, phone, custom) or without one is refused with 401. Add a method there when the app enables it.
 
 ## Add a feature
 

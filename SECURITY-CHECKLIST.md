@@ -8,6 +8,8 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
 ## Access
 
 1. Every route calls `call.requireUser()` before it reads the body or looks anything up. No token, or a bad one, is 401.
+1. Only the sign-in methods listed in `ALLOWED_SIGN_IN_PROVIDERS` get an account; any other (anonymous by default) is
+   401.
 <!-- cmpose:sharing -->
 1. A route on a space's data calls `call.requireRole(spaces, spaceId, Role.VIEWER)` to read and `Role.EDITOR` to
    write, then uses the returned `membership.spaceId`, never the raw parameter. For a row looked up by id, load it

@@ -79,6 +79,7 @@ fun Application.module(deps: AppDeps) {
             deps.jwkProvider,
             config.firebaseProjectId,
             config.jwtClockSkewSeconds,
+            config.allowedSignInProviders.toSet(),
             publishedKeyIds = deps.jwkKeyIds,
         )
         installUserAuth(UserAuth(verifier, users))

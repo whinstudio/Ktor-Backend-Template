@@ -32,6 +32,7 @@ fun testConfig(appVersion: String = "test-1") = AppConfig(
     // /cmpose:sharing
     publicBaseUrl = null,
     jwtClockSkewSeconds = 60L,
+    allowedSignInProviders = listOf("password", "google.com", "apple.com"),
     dbPoolSize = 5,
     appVersion = appVersion,
 )

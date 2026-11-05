@@ -101,4 +101,34 @@ class AppConfigTest {
         val config = AppConfig.fromEnv(required + ("CORS_ALLOWED_ORIGINS" to "https://a.test, https://b.test"))
         assertEquals(listOf("https://a.test", "https://b.test"), config.corsAllowedOrigins)
     }
+
+    @Test
+    fun signInProvidersDefault() {
+        val config = AppConfig.fromEnv(required)
+        assertEquals(listOf("password", "google.com", "apple.com"), config.allowedSignInProviders)
+    }
+
+    @Test
+    fun signInProvidersParsed() {
+        val config = AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to "password, phone"))
+        assertEquals(listOf("password", "phone"), config.allowedSignInProviders)
+    }
+
+    /** A comma-only value counts as unset: never "allow nothing", never "allow everything". */
+    @Test
+    fun signInProvidersCommaOnlyIsDefault() {
+        val config = AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to " , "))
+        assertEquals(listOf("password", "google.com", "apple.com"), config.allowedSignInProviders)
+    }
+
+    @Test
+    fun malformedSignInProviderIsRejected() {
+        for (value in listOf("Google.com", "google com")) {
+            val error = assertFailsWith<ConfigException> {
+                AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to value))
+            }
+            assertEquals(listOf("ALLOWED_SIGN_IN_PROVIDERS"), error.invalid, "value $value")
+            assertFalse(value in error.message.orEmpty(), "the value itself stays out of the message")
+        }
+    }
 }

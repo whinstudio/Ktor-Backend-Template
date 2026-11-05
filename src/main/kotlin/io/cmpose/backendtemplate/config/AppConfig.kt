@@ -16,6 +16,8 @@ private const val DEFAULT_MAX_MEMBERS_PER_SPACE = 50
 private const val DEFAULT_MAX_PENDING_INVITES_PER_SPACE = 20
 // /cmpose:sharing
 private const val DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60L
+private const val DEFAULT_ALLOWED_SIGN_IN_PROVIDERS = "password,google.com,apple.com"
+private val SIGN_IN_PROVIDER = Regex("^[a-z0-9.]+$")
 private const val DEFAULT_DB_POOL_SIZE = 5
 private const val DEFAULT_APP_VERSION = "dev"
 
@@ -45,6 +47,8 @@ data class AppConfig(
     // /cmpose:sharing
     val publicBaseUrl: String?,
     val jwtClockSkewSeconds: Long,
+    // Firebase `sign_in_provider` ids that get an account; any other (anonymous, phone, custom...) is refused.
+    val allowedSignInProviders: List<String>,
     val dbPoolSize: Int,
     val appVersion: String,
 ) {
@@ -60,8 +64,8 @@ data class AppConfig(
             "inviteTtlDays=$inviteTtlDays, maxSpacesPerUser=$maxSpacesPerUser, " +
             "maxMembersPerSpace=$maxMembersPerSpace, maxPendingInvitesPerSpace=$maxPendingInvitesPerSpace, " +
             // /cmpose:sharing
-            "publicBaseUrl=$publicBaseUrl, jwtClockSkewSeconds=$jwtClockSkewSeconds, dbPoolSize=$dbPoolSize, " +
-            "appVersion=$appVersion)"
+            "publicBaseUrl=$publicBaseUrl, jwtClockSkewSeconds=$jwtClockSkewSeconds, " +
+            "allowedSignInProviders=$allowedSignInProviders, dbPoolSize=$dbPoolSize, appVersion=$appVersion)"
 
     companion object {
         /**
@@ -99,6 +103,8 @@ data class AppConfig(
                     publicBaseUrl = optional("PUBLIC_BASE_URL"),
                     jwtClockSkewSeconds =
                     long("JWT_CLOCK_SKEW_SECONDS", DEFAULT_JWT_CLOCK_SKEW_SECONDS, 0L..Long.MAX_VALUE),
+                    allowedSignInProviders =
+                    list("ALLOWED_SIGN_IN_PROVIDERS", DEFAULT_ALLOWED_SIGN_IN_PROVIDERS, SIGN_IN_PROVIDER),
                     dbPoolSize = int("DB_POOL_SIZE", DEFAULT_DB_POOL_SIZE),
                     appVersion = optional("APP_VERSION") ?: DEFAULT_APP_VERSION,
                 )
@@ -130,8 +136,15 @@ private class EnvReader(private val env: Map<String, String>) {
 
     fun required(name: String): String = optional(name) ?: "".also { missing += name }
 
-    fun list(name: String, default: String): List<String> =
-        (optional(name) ?: default).split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    fun list(name: String, default: String): List<String> = split(optional(name) ?: default)
+
+    /** A list whose every entry matches [entry]; one that holds no entry at all (e.g. " , ") counts as unset. */
+    fun list(name: String, default: String, entry: Regex): List<String> {
+        val values = optional(name)?.let(::split)?.takeIf { it.isNotEmpty() } ?: return split(default)
+        return values.takeIf { all -> all.all(entry::matches) } ?: split(default).also { invalid += name }
+    }
+
+    private fun split(raw: String) = raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
     fun int(name: String, default: Int, range: IntRange = 1..Int.MAX_VALUE): Int {
         val raw = optional(name) ?: return default
