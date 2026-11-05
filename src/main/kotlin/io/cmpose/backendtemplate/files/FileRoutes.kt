@@ -19,6 +19,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.log
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.contentType
 import io.ktor.server.request.receiveMultipart
@@ -114,8 +115,8 @@ private suspend fun ApplicationCall.requireFile(files: FileRepository, spaces: S
 /**
  * Files: upload (multipart, field `file`, at most `MAX_UPLOAD_BYTES`), download and delete. The type comes from the
  * bytes ([ContentSniffer]), never from the name or header; anything else is a 415. A file the caller may not see is a
- * 404, the same as a missing one. Uploads count against [SENSITIVE_LIMIT], and at most [maxConcurrentUploads] run at
- * once (see [withUploadPermit]).
+ * 404, the same as a missing one. Uploads and deletions count against [SENSITIVE_LIMIT], and at most
+ * [maxConcurrentUploads] uploads run at once (see [withUploadPermit]). A deletion writes an audit line.
  */
 fun Route.fileRoutes(
     files: FileRepository,
@@ -166,14 +167,19 @@ fun Route.fileRoutes(
         call.response.header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.toString())
         call.respondBytes(bytes, ContentType.parse(stored.mime))
     }
-    delete("/api/v1/files/{id}") {
-        // cmpose:sharing-off: val user = call.requireUser()
-        call.requireUser()
-        // cmpose:sharing-off: val stored = files.get(call.fileId(), user) ?: notFound()
-        val stored = call.requireFile(files, spaces, Role.EDITOR)
-        // cmpose:sharing-off: if (files.delete(stored.id, user)) call.removeFiles(store, listOf(stored.path))
-        if (files.delete(stored.id)) call.removeFiles(store, listOf(stored.path))
-        call.respond(HttpStatusCode.NoContent)
+    rateLimit(SENSITIVE_LIMIT) {
+        delete("/api/v1/files/{id}") {
+            // cmpose:sharing-off: val user = call.requireUser()
+            call.requireUser()
+            // cmpose:sharing-off: val stored = files.get(call.fileId(), user) ?: notFound()
+            val stored = call.requireFile(files, spaces, Role.EDITOR)
+            // cmpose:sharing-off: if (files.delete(stored.id, user)) {
+            if (files.delete(stored.id)) {
+                call.removeFiles(store, listOf(stored.path))
+                call.application.log.info("File deleted")
+            }
+            call.respond(HttpStatusCode.NoContent)
+        }
     }
 }
 

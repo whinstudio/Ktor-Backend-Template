@@ -63,6 +63,13 @@ class InviteRoutesTest {
         block(jsonClient())
     }
 
+    /**
+     * A space owned by [token]'s user, made through the repository rather than `POST /api/v1/spaces`: that route counts
+     * against the sensitive limit, which the tests using this helper count for the invite routes alone.
+     */
+    private suspend fun HttpClient.ownedSpace(token: String, name: String): SpaceResponse =
+        SpaceRepository(TestDb.database).create(UserId(UUID.fromString(userId(token))), name)
+
     private fun sha256Hex(text: String) =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
@@ -253,7 +260,7 @@ class InviteRoutesTest {
 
     @Test
     fun inviteCreationIsRateLimited() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 3)) { client ->
-        val space = client.createSpace(alice, "Trip")
+        val space = client.ownedSpace(alice, "Trip")
         val statuses = List(4) { client.inviteResponse(alice, space.id, Role.VIEWER).status }
         assertEquals(List(3) { HttpStatusCode.Created } + HttpStatusCode.TooManyRequests, statuses)
         assertEquals(3L, transaction(TestDb.database) { Invites.selectAll().count() })
@@ -261,7 +268,7 @@ class InviteRoutesTest {
 
     @Test
     fun inviteListSkipsTheSensitiveLimit() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 1)) { client ->
-        val space = client.createSpace(alice, "Trip")
+        val space = client.ownedSpace(alice, "Trip")
         // The members screen lists on every load: that must not use up the owner's sensitive budget.
         repeat(2) { assertEquals(HttpStatusCode.OK, client.pendingInvites(alice, space.id).status) }
         val link = client.invite(alice, space.id, Role.VIEWER)
@@ -304,7 +311,8 @@ class InviteRoutesTest {
 
     @Test
     fun pendingInviteQuota() = withApp(testConfig().copy(maxPendingInvitesPerSpace = 2)) { client ->
-        val space = client.createSpace(alice, "Trip")
+        // Alice makes nine sensitive calls here; the spaces come from the repository so the tenth is not reached.
+        val space = client.ownedSpace(alice, "Trip")
         val aliceId = UserId(UUID.fromString(client.userId(alice)))
         val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
         // An expired invite is not pending: it does not count.
@@ -322,7 +330,7 @@ class InviteRoutesTest {
         client.invite(alice, space.id, Role.VIEWER)
         client.inviteResponse(alice, space.id, Role.VIEWER).assertQuotaExceeded("invites")
         // The quota is per space.
-        client.invite(alice, client.createSpace(alice, "Other").id, Role.VIEWER)
+        client.invite(alice, client.ownedSpace(alice, "Other").id, Role.VIEWER)
         assertEquals(6L, inviteCount())
     }
 

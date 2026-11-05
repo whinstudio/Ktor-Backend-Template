@@ -62,12 +62,14 @@ class FileRoutesTest {
     private fun withApp(
         maxUploadBytes: Long = 10_485_760L,
         maxStorageBytesPerUser: Long = 0L,
+        rateLimitSensitivePerMinute: Int = testConfig().rateLimitSensitivePerMinute,
         block: suspend ApplicationTestBuilder.(HttpClient) -> Unit,
     ) = testApplication {
         val config = testConfig().copy(
             filesDir = dir.toString(),
             maxUploadBytes = maxUploadBytes,
             maxStorageBytesPerUser = maxStorageBytesPerUser,
+            rateLimitSensitivePerMinute = rateLimitSensitivePerMinute,
         )
         application { module(authDeps(config = config)) }
         block(jsonClient())
@@ -158,6 +160,27 @@ class FileRoutesTest {
         assertEquals(0L, rowCount())
         assertTrue(dir.listDirectoryEntries().isEmpty())
         assertEquals(HttpStatusCode.NotFound, client.get("/api/v1/files/$id") { bearerAuth(alice) }.status)
+    }
+
+    @Test
+    fun fileDeletionIsRateLimited() = withApp(rateLimitSensitivePerMinute = 2) { client ->
+        val statuses = List(3) { client.delete("/api/v1/files/${UUID.randomUUID()}") { bearerAuth(alice) }.status }
+        assertEquals(List(2) { HttpStatusCode.NotFound } + HttpStatusCode.TooManyRequests, statuses)
+    }
+
+    /** The message alone: the request's own MDC already carries its path, request id and user id. */
+    @Test
+    fun deletingAFileWritesAnAuditLine() {
+        val messages = capturedLogs {
+            withApp { client ->
+                val id = client.upload(alice).body<Uploaded>().id
+                assertEquals(HttpStatusCode.NoContent, client.delete("/api/v1/files/$id") { bearerAuth(alice) }.status)
+                // Already gone: no row removed, no second audit line.
+                assertEquals(HttpStatusCode.NotFound, client.delete("/api/v1/files/$id") { bearerAuth(alice) }.status)
+            }
+        }.map { it.formattedMessage }
+        val audit = messages.filter { it.startsWith("File deleted") }
+        assertEquals(listOf("File deleted"), audit, messages.joinToString("\n"))
     }
 
     @Test

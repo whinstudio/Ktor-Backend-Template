@@ -229,4 +229,41 @@ class SpaceRoutesTest {
             assertEquals(1, ownedSharedSpacesOf(client.userId(alice)))
         }
     }
+
+    @Test
+    fun spaceCreationIsRateLimited() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 2)) { client ->
+        repeat(2) { client.createSpace(alice, "Trip $it") }
+        val third = client.post("/api/v1/spaces") { jsonBody(alice, SpaceDraft("Third")) }
+        assertEquals(HttpStatusCode.TooManyRequests, third.status)
+        // Listing and renaming stay on the global limiter.
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/spaces") { bearerAuth(alice) }.status)
+        val id = client.spaces(alice).first { !it.personal }.id
+        val renamed = client.patch("/api/v1/spaces/$id") { jsonBody(alice, SpaceDraft("Renamed")) }
+        assertEquals(HttpStatusCode.OK, renamed.status)
+    }
+
+    @Test
+    fun spaceDeletionIsRateLimited() = withApp(testConfig().copy(rateLimitSensitivePerMinute = 2)) { client ->
+        val statuses = List(3) { client.delete("/api/v1/spaces/${UUID.randomUUID()}") { bearerAuth(alice) }.status }
+        assertEquals(List(2) { HttpStatusCode.NotFound } + HttpStatusCode.TooManyRequests, statuses)
+    }
+
+    @Test
+    fun deletingASpaceWritesAnAuditLine() {
+        val email = "alice@example.com"
+        val name = "Secret Trip"
+        val logs = capturedLogs {
+            withApp { client ->
+                val owner = TestKeys.token(sub = "alice", email = email)
+                val space = client.createSpace(owner, name)
+                val deleted = client.delete("/api/v1/spaces/${space.id}") { bearerAuth(owner) }
+                assertEquals(HttpStatusCode.NoContent, deleted.status)
+            }
+        }.map { it.fullText() }
+        assertTrue(logs.any { it.startsWith("Space deleted") }, logs.joinToString("\n"))
+        logs.forEach { line ->
+            assertFalse(line.contains(name), "log leaks the space name: $line")
+            assertFalse(line.contains(email), "log leaks the email: $line")
+        }
+    }
 }
