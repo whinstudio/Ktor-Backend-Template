@@ -135,6 +135,14 @@ class AppConfigTest {
     }
 
     @Test
+    fun identityPlatformProviderIdsAreAccepted() {
+        // OIDC and SAML provider ids may hold hyphens and underscores.
+        val value = "password, oidc.my-idp, saml.acme_sso"
+        val config = AppConfig.fromEnv(required + ("ALLOWED_SIGN_IN_PROVIDERS" to value))
+        assertEquals(listOf("password", "oidc.my-idp", "saml.acme_sso"), config.allowedSignInProviders)
+    }
+
+    @Test
     fun badMaxConcurrentDownloadsIsReportedByName() = assertReportedByName("MAX_CONCURRENT_DOWNLOADS", "0", "-3", "many")
 
     @Test

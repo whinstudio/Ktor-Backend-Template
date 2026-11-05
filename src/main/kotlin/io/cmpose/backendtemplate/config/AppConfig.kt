@@ -23,7 +23,8 @@ private const val DEFAULT_MAX_PENDING_INVITES_PER_SPACE = 20
 // /cmpose:sharing
 private const val DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60L
 private const val DEFAULT_ALLOWED_SIGN_IN_PROVIDERS = "password,google.com,apple.com"
-private val SIGN_IN_PROVIDER = Regex("^[a-z0-9.]+$")
+// Firebase's built-in ids and Identity Platform's `oidc.<id>` / `saml.<id>` ones: lower case, digits, `.`, `-`, `_`.
+private val SIGN_IN_PROVIDER = Regex("^[a-z0-9._-]+$")
 private val CORS_SCHEMES = setOf("http", "https")
 private const val DEFAULT_DB_POOL_SIZE = 5
 private const val DEFAULT_APP_VERSION = "dev"
