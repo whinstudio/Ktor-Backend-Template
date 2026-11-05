@@ -100,6 +100,8 @@ and the tests.
   The sample feature has both: `GET /api/v1/items` pages, `GET /api/v1/items/recent` returns the newest 20 as one array.
 <!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
+- `GET /api/v1/spaces` returns at most 200 spaces as one array, not paged: the caller's personal space first, then by
+  name ignoring case.
 - Invites: an OWNER lists a space's valid invites with `GET /api/v1/spaces/{id}/invites` (newest first, at most 200,
   not paged; `id`, `role`, `createdAt`, `expiresAt`, never the token) and revokes one with
   `DELETE /api/v1/spaces/{id}/invites/{inviteId}` (204, also when called again; 409 `INVITE_USED` once used; another

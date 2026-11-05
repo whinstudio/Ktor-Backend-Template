@@ -11,6 +11,7 @@ import io.cmpose.backendtemplate.sharing.SpaceMembers
 import io.cmpose.backendtemplate.sharing.SpaceRepository
 import io.cmpose.backendtemplate.sharing.SpaceResponse
 import io.cmpose.backendtemplate.sharing.Spaces
+import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserRepository
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -106,6 +107,22 @@ class SpaceRoutesTest {
         assertEquals(Role.VIEWER, beta.role)
         assertEquals(2, beta.memberCount)
         assertFalse(beta.personal)
+    }
+
+    @Test
+    fun listIsBoundedInTheDatabaseKeepingItsOrder() = withApp { client ->
+        val aliceId = UserId(UUID.fromString(client.userId(alice)))
+        val repository = SpaceRepository(TestDb.database)
+        listOf("b", "A", "c", "D").forEach { repository.create(aliceId, it) }
+        assertEquals(
+            listOf(PERSONAL_SPACE_NAME, "A", "b"),
+            repository.listFor(aliceId, limit = 3).map { it.name },
+        )
+        // Fewer spaces than MAX_LISTED_SPACES: the default call lists every one of them.
+        assertEquals(
+            listOf(PERSONAL_SPACE_NAME, "A", "b", "c", "D"),
+            repository.listFor(aliceId).map { it.name },
+        )
     }
 
     @Test
