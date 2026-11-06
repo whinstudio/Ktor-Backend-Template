@@ -6,6 +6,7 @@ import io.cmpose.backendtemplate.plugins.quotaExceeded
 import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.UserIdentities
 import io.cmpose.backendtemplate.users.Users
+import io.cmpose.backendtemplate.users.lockUser
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.Case
 import org.jetbrains.exposed.sql.Database
@@ -82,7 +83,8 @@ enum class MemberChange { DONE, NOT_MEMBER, LAST_OWNER }
 
 /**
  * `LOWER(name) COLLATE "C"`: the name lower-cased, compared by code point rather than by the database's locale, so
- * the order does not depend on how the database was set up.
+ * the order does not depend on how the database was set up. It is a stable order, not any language's alphabet: names
+ * outside ASCII sort after `z`.
  */
 private object LowerNameBytewise : Expression<String>() {
     override fun toQueryBuilder(queryBuilder: QueryBuilder) = queryBuilder {
@@ -198,14 +200,11 @@ class SpaceRepository(
     }
 
     /**
-     * Refuses a new space when [user] already owns [maxSpacesPerUser] shared ones. Their user row is locked first, so
-     * two creates cannot both pass on the same count, and account deletion (which locks it `FOR UPDATE`) waits. The
-     * lock is `FOR NO KEY UPDATE`, as for the storage quota: the foreign keys' key-share locks on the row stay free.
+     * Refuses a new space when [user] already owns [maxSpacesPerUser] shared ones. Their user row is locked first
+     * ([lockUser]), so two creates cannot both pass on the same count.
      */
     private fun checkSpaces(user: UserId) {
-        Users.select(Users.id).where { Users.id eq user.value }
-            .forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
-            .toList()
+        lockUser(user.value)
         val owned = Spaces.selectAll()
             .where { (Spaces.ownerId eq user.value) and (Spaces.isPersonal eq false) }
             .count()

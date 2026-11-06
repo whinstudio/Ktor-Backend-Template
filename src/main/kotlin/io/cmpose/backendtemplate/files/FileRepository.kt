@@ -7,6 +7,7 @@ import io.cmpose.backendtemplate.plugins.quotaExceeded
 import io.cmpose.backendtemplate.sharing.Spaces
 import io.cmpose.backendtemplate.users.UserId
 import io.cmpose.backendtemplate.users.Users
+import io.cmpose.backendtemplate.users.lockUser
 import org.jetbrains.exposed.sql.AndOp
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.JoinType
@@ -19,7 +20,6 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
 import org.jetbrains.exposed.sql.transactions.transaction
-import org.jetbrains.exposed.sql.vendors.ForUpdateOption
 import java.sql.SQLException
 import java.util.UUID
 
@@ -86,9 +86,7 @@ class FileRepository(private val db: Database, private val maxStorageBytesPerUse
 
     /**
      * Refuses [file] when its user's stored bytes plus its own would pass [maxStorageBytesPerUser]. That user's row is
-     * locked first, so two uploads cannot both pass on the same total, and account deletion (which locks it `FOR
-     * UPDATE`) waits. The lock is `FOR NO KEY UPDATE`: it does not block the key-share lock a foreign key takes on the
-     * row, so an upload whose insert points at a user another upload has locked cannot deadlock with it.
+     * locked first ([lockUser]), so two uploads cannot both pass on the same total.
      */
     private fun checkStorage(file: StoredFile) {
         // cmpose:sharing
@@ -98,9 +96,7 @@ class FileRepository(private val db: Database, private val maxStorageBytesPerUse
         // /cmpose:sharing
         // cmpose:sharing-off: val charged = file.ownerId.value
         val charged = space?.get(Spaces.ownerId) ?: notFound()
-        Users.select(Users.id).where { Users.id eq charged }
-            .forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
-            .toList()
+        lockUser(charged)
         val total = StoredFiles.size.sum()
         // cmpose:sharing-off: val used = StoredFiles.select(total)
         val used = StoredFiles.join(Spaces, JoinType.INNER, StoredFiles.spaceId, Spaces.id).select(total)

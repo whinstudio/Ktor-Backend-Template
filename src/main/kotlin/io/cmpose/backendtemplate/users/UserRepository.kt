@@ -13,6 +13,7 @@ import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.vendors.ForUpdateOption
 import java.util.UUID
 
 /** Our own id for a user; a provider's subject (the Firebase uid) is only mapped to it, never used in its place. */
@@ -25,6 +26,18 @@ value class UserId(val value: UUID) {
 const val MAX_DISPLAY_NAME = 80
 
 // Mirror db/migration/V1__core.sql; Flyway owns the schema, these objects only describe it to Exposed.
+
+/**
+ * Locks [id]'s user row until the transaction ends; needs a transaction. Whatever counts against that user's quota is
+ * counted after this, so two writes cannot both pass on the same count, and account deletion (which locks the row
+ * `FOR UPDATE`) waits. The lock is `FOR NO KEY UPDATE`: it leaves free the key-share lock that a foreign key takes on
+ * the row, so a write whose insert points at a user another write has locked cannot deadlock with it.
+ */
+internal fun lockUser(id: UUID) {
+    Users.select(Users.id).where { Users.id eq id }
+        .forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
+        .toList()
+}
 
 object Users : Table("users") {
     val id = uuid("id")
