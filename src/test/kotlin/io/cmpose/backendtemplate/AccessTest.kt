@@ -16,7 +16,6 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
-import kotlin.io.path.createTempDirectory
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,7 +34,7 @@ class AccessTest {
     private val carol = TestKeys.token(sub = "carol")
 
     private fun withApp(block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {
-        val config = testConfig().copy(filesDir = createTempDirectory("access-test").toString())
+        val config = testConfig().copy(filesDir = tempDir("access-test").toString())
         application { module(authDeps(config = config)) }
         block(jsonClient())
     }

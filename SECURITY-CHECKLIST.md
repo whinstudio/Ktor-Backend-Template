@@ -78,7 +78,10 @@ The sample feature (`feature/sample`, `V3__sample.sql` and its tests) follows ev
 1. A costly or security-sensitive route (upload, deletion, invitations, anything sign-in-like) runs under
    `rateLimit(SENSITIVE_LIMIT)` and writes an audit log line without personal data. A route that holds a large body in
    memory also caps how many run at once (as uploads and downloads do with `MAX_CONCURRENT_UPLOADS` and
-   `MAX_CONCURRENT_DOWNLOADS`).
+   `MAX_CONCURRENT_DOWNLOADS`). The permit is held until the body is read or written, so that many slow clients reaching
+   the app directly would make everyone else's transfer answer 503 `UPLOADS_BUSY` or `DOWNLOADS_BUSY`. Keep nginx's
+   request and response buffering on (its default; `deploy/nginx/cmpose-app.conf` leaves it): nginx then takes the slow
+   client off the app, and the app's port stays unpublished.
 1. A change that must happen once (a payment, a counter, a single-use token) is idempotent and safe under races: check
    and change in one transaction with `SELECT … FOR UPDATE`, or in one conditional `UPDATE`.
 1. A new write path that adds to something a quota counts checks the quota in the same locked transaction as the

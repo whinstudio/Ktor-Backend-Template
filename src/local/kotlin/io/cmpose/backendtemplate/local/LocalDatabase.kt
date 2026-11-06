@@ -2,6 +2,7 @@ package io.cmpose.backendtemplate.local
 
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres
 import java.io.File
+import java.sql.SQLException
 
 private const val DATABASE = "app"
 private const val SUPERUSER = "postgres"
@@ -21,14 +22,22 @@ class LocalDatabase private constructor(private val postgres: EmbeddedPostgres) 
                 .setDataDirectory(dir.resolve("postgres"))
                 .setCleanDataDirectory(false)
                 .start()
-            postgres.postgresDatabase.connection.use { c ->
-                val exists = c.prepareStatement("SELECT 1 FROM pg_database WHERE datname = ?")
-                    .apply { setString(1, DATABASE) }
-                    .executeQuery()
-                    .next()
-                if (!exists) c.createStatement().execute("CREATE DATABASE $DATABASE")
+            try {
+                createAppDatabase(postgres)
+            } catch (e: SQLException) {
+                // Nobody else has a handle on it: left running, it would keep the data folder locked in this process.
+                postgres.close()
+                throw e
             }
             return LocalDatabase(postgres)
+        }
+
+        private fun createAppDatabase(postgres: EmbeddedPostgres) = postgres.postgresDatabase.connection.use { c ->
+            val exists = c.prepareStatement("SELECT 1 FROM pg_database WHERE datname = ?")
+                .apply { setString(1, DATABASE) }
+                .executeQuery()
+                .next()
+            if (!exists) c.createStatement().execute("CREATE DATABASE $DATABASE")
         }
     }
 }

@@ -65,7 +65,7 @@ class LogRedactionTest {
                 client.post("/api/v1/invites/$code/accept") { bearerAuth(TestKeys.token()) }
             }
         }.map { it.fullText() }
-        assertTrue(logs.any { it.contains("/api/v1/invites/{token}/accept") }, logs.joinToString("\n"))
+        assertTrue(logs.any { it.contains("/api/v1/invites/{invite}/accept") }, logs.joinToString("\n"))
         assertNotLogged(logs, code)
     }
 

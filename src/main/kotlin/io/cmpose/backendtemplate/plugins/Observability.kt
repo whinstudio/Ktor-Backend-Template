@@ -33,7 +33,7 @@ val ApplicationCall.requestId: String get() = callId.orEmpty()
 // A path segment after one of these keys is a secret or a user id: logged as a placeholder.
 private val REDACTED_AFTER = mapOf<String, String>(
     // cmpose:sharing
-    "invites" to "{token}",
+    "invites" to "{invite}",
     "members" to "{userId}",
     // /cmpose:sharing
 )

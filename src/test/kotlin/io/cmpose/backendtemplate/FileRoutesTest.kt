@@ -41,7 +41,6 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.io.path.createTempDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -60,7 +59,7 @@ class FileRoutesTest {
     @BeforeTest
     fun clean() {
         TestDb.reset()
-        dir = createTempDirectory("files-test")
+        dir = tempDir("files-test")
     }
 
     private fun withApp(

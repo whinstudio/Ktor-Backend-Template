@@ -103,7 +103,8 @@ tasks.register<JavaExec>("writeOpenApi") {
     description = "Writes the OpenAPI document to build/openapi/openapi.json"
     classpath = local.runtimeClasspath
     mainClass.set("io.cmpose.backendtemplate.local.OpenApiDumpKt")
-    args(openApiFile.get().asFile.absolutePath)
+    val output = openApiFile // a local: a lambda that reaches the script object breaks the configuration cache
+    argumentProviders.add(CommandLineArgumentProvider { listOf(output.get().asFile.absolutePath) })
     outputs.file(openApiFile)
 }
 

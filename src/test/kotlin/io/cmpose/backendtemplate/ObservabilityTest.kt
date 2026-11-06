@@ -58,7 +58,7 @@ class ObservabilityTest {
         val mdc = line.mdcPropertyMap
         assertEquals("GET", mdc["method"])
         // cmpose:sharing-off: assertEquals("/api/v1/nothing", mdc["path"])
-        assertEquals("/api/v1/invites/{token}", mdc["path"])
+        assertEquals("/api/v1/invites/{invite}", mdc["path"])
         assertEquals("404", mdc["status"])
         assertNotNull(mdc["durationMs"]?.toLongOrNull())
         assertFalse(line.formattedMessage.contains("secret-code"))
@@ -67,14 +67,14 @@ class ObservabilityTest {
     @Test
     fun pathRedaction() {
         // cmpose:sharing
-        assertEquals("/api/v1/invites/{token}/accept", redactedPath("/api/v1/invites/t1/accept"))
+        assertEquals("/api/v1/invites/{invite}/accept", redactedPath("/api/v1/invites/t1/accept"))
         assertEquals("/api/v1/spaces/abc/members/{userId}", redactedPath("/api/v1/spaces/abc/members/u1"))
         assertEquals("/api/v1/spaces/abc/members", redactedPath("/api/v1/spaces/abc/members"))
         assertEquals("/api/v1/invites/preview", redactedPath("/api/v1/invites/preview"))
         assertEquals("/api/v1/invites/accept", redactedPath("/api/v1/invites/accept"))
         val spaceId = "0b6f3c1e-8a52-4d7b-9f0e-2c4d6e8a1b3c"
         assertEquals(
-            "/api/v1/spaces/$spaceId/invites/{token}",
+            "/api/v1/spaces/$spaceId/invites/{invite}",
             redactedPath("/api/v1/spaces/$spaceId/invites/5e7a9c2b-1d3f-4a6b-8c0e-7f9a1b3d5c7e"),
         )
         assertEquals(

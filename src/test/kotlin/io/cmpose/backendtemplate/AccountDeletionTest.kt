@@ -16,7 +16,6 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.nio.file.Path
 import java.util.UUID
-import kotlin.io.path.createTempDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.test.BeforeTest
@@ -36,7 +35,7 @@ class AccountDeletionTest {
     @BeforeTest
     fun clean() {
         TestDb.reset()
-        dir = createTempDirectory("account-test")
+        dir = tempDir("account-test")
     }
 
     private val alice = TestKeys.token(sub = "alice")

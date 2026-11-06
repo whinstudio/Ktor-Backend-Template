@@ -35,7 +35,6 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
-import kotlin.io.path.createTempDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -49,7 +48,7 @@ class SpaceRoutesTest {
     @BeforeTest
     fun clean() {
         TestDb.reset()
-        dir = createTempDirectory("space-test")
+        dir = tempDir("space-test")
     }
 
     private val alice = TestKeys.token(sub = "alice")

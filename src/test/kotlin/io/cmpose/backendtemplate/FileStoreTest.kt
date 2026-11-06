@@ -6,7 +6,6 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
-import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
@@ -28,7 +27,7 @@ class FileStoreTest {
 
     @BeforeTest
     fun setUp() {
-        base = createTempDirectory("store-test")
+        base = tempDir("store-test")
         root = base.resolve("files").createDirectories()
         store = LocalDiskFileStore(root)
     }

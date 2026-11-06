@@ -80,8 +80,8 @@ enum class InviteState {
 @Serializable
 data class PendingInvite(val id: String, val role: Role, val createdAt: Long, val expiresAt: Long)
 
-/** How a revoke ended: done (also when it was revoked or had expired already), refused as used, or no such invite. */
-enum class RevokeResult { REVOKED, USED, NOT_FOUND }
+/** How a revoke ended: done, nothing to do (revoked or expired already), refused as used, or no such invite. */
+enum class RevokeResult { REVOKED, UNCHANGED, USED, NOT_FOUND }
 
 /** What an invite offers, and from whom: [inviterName] is its creator's display name, null when they have none. */
 @Serializable
@@ -170,8 +170,8 @@ class InviteRepository(
     }
 
     /**
-     * Revokes [spaceId]'s invite [inviteId]: a valid one gets its revocation time; a revoked or expired one is left as
-     * it is and reported [RevokeResult.REVOKED] too, so a repeat does the same. A used invite is refused
+     * Revokes [spaceId]'s invite [inviteId]: a valid one gets its revocation time ([RevokeResult.REVOKED]); a revoked
+     * or expired one is left as it is ([RevokeResult.UNCHANGED]). A used invite is refused
      * ([RevokeResult.USED]); one of another space, or none, is [RevokeResult.NOT_FOUND]. Locks the space row
      * ([lockSpace]), then the invite row (`FOR UPDATE`), the order an accept keeps: the two cannot both pass.
      */
@@ -188,7 +188,7 @@ class InviteRepository(
                 Invites.update({ Invites.id eq inviteId }) { it[revokedAt] = at }
                 RevokeResult.REVOKED
             }
-            InviteState.REVOKED, InviteState.EXPIRED -> RevokeResult.REVOKED
+            InviteState.REVOKED, InviteState.EXPIRED -> RevokeResult.UNCHANGED
         }
     }
 
