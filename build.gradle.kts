@@ -37,6 +37,13 @@ dependencies {
     testImplementation(libs.ktor.client.content.negotiation)
     testImplementation(libs.embedded.postgres)
     testImplementation(platform(libs.embedded.postgres.bom))
+
+    constraints {
+        // Transitive only. Ktor pulls an older kotlin-reflect than the compiler's, and the JWT libraries an unpatched
+        // jackson-databind; both are raised here so the dependency scan sees the fixed versions.
+        implementation(libs.kotlin.reflect)
+        implementation(libs.jackson.databind)
+    }
 }
 
 tasks.test { useJUnitPlatform() }

@@ -30,7 +30,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
-import io.ktor.utils.io.readRemaining
+import io.ktor.utils.io.readBuffer
 import kotlinx.io.readByteArray
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.serialization.Serializable
@@ -69,7 +69,7 @@ private suspend fun ApplicationCall.receiveFile(
     try {
         receiveMultipart(formFieldLimit = maxBytes).forEachPart { part ->
             if (part is PartData.FileItem && part.name == FILE_FIELD && bytes == null) {
-                bytes = part.provider().readRemaining(maxBytes + 1).readByteArray()
+                bytes = part.provider().readBuffer(maxBytes + 1).readByteArray()
             }
             // cmpose:sharing
             if (part is PartData.FormItem && part.name == SPACE_FIELD) onSpaceId(part.value)
