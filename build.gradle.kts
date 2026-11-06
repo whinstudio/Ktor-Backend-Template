@@ -14,6 +14,7 @@ application { mainClass.set("io.cmpose.backendtemplate.MainKt") }
 dependencies {
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
+    implementation(platform(libs.netty.bom))
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.server.call.id)
     implementation(libs.ktor.server.call.logging)
