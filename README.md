@@ -67,11 +67,11 @@ and the tests.
   `UNSUPPORTED_MEDIA_TYPE`, `CLIENT_UPGRADE_REQUIRED`, `RATE_LIMITED`, `INTERNAL`, `AUTH_UNAVAILABLE`,
   `UPLOADS_BUSY`, `DOWNLOADS_BUSY`, `QUOTA_EXCEEDED` (409, with `quota` naming the limit reached: `storage`). A 500
   carries no detail beyond the request id.
-<!-- cmpose:sharing -->
+  <!-- cmpose:sharing -->
   With sharing also: `LAST_OWNER` (409, a space needs at least one owner), and on accepting an invite `INVITE_USED`
   (409, already used; also on revoking a used one), `INVITE_REVOKED` (410, revoked by an owner) and `INVITE_EXPIRED`
   (410). `QUOTA_EXCEEDED`'s `quota` may also be `spaces`, `members` or `invites`.
-<!-- /cmpose:sharing -->
+  <!-- /cmpose:sharing -->
 - Headers:
   - Every response has `X-App-Version` (`APP_VERSION`) and `X-Request-Id`: the client's own id when it sends a safe
     one (letters, digits, `-`, `_`, `.`, at most 128 characters), else a generated one. Quote it when reporting a
@@ -80,25 +80,31 @@ and the tests.
     `minVersion`; a malformed value is 400; no header passes.
   - An app built before a server change may misread its new answers: one built before the quotas does not know
     `QUOTA_EXCEEDED` and shows a general error instead of the quota message.
-<!-- cmpose:sharing -->
+    <!-- cmpose:sharing -->
     One built before invite revocation shows a `revoked` invite preview as an unknown error, takes
     `QUOTA_EXCEEDED` on accepting an invite for "already used" (both are 409) and `INVITE_REVOKED` for "expired".
-<!-- /cmpose:sharing -->
+    <!-- /cmpose:sharing -->
     After deploying such a server, raise `MIN_CLIENT_VERSION` to the first app release that knows the new answers,
     so older apps are sent to update.
-  - A rate-limited request gets 429 `RATE_LIMITED` with `Retry-After`.
+  - A rate-limited request gets 429 `RATE_LIMITED` with `Retry-After`. The strict limit
+    (`RATE_LIMIT_SENSITIVE_PER_MINUTE`, default 10) is one budget per caller, not one per route: uploads, file deletes
+    and account deletion all spend it, so an app that deletes many files at once must pace itself and honour
+    `Retry-After`.
+    <!-- cmpose:sharing -->
+    Creating and deleting spaces and the invite routes (see below) spend the same budget.
+    <!-- /cmpose:sharing -->
 - A missing or invalid token is 401 `UNAUTHORIZED`. When Google's keys cannot be fetched and none is cached, the answer
   is 503 `AUTH_UNAVAILABLE`, so the app retries instead of signing out.
 - **The 404 rule:** a row the caller may not see answers 404 `NOT_FOUND`, exactly like a row that does not exist. The
   server never says 403, so ids cannot be probed.
-<!-- cmpose:sharing -->
+  <!-- cmpose:sharing -->
   With sharing, a non-member of a space and a member whose role is too low both get 404.
-<!-- /cmpose:sharing -->
+  <!-- /cmpose:sharing -->
 - A list that can grow pages with `limit` and an opaque `cursor`; the response's `nextCursor` is `null` on the last
   page. A small list with a fixed upper bound may answer in one response. No list is unbounded.
-<!-- cmpose:sample -->
+  <!-- cmpose:sample -->
   The sample feature has both: `GET /api/v1/items` pages, `GET /api/v1/items/recent` returns the newest 20 as one array.
-<!-- /cmpose:sample -->
+  <!-- /cmpose:sample -->
 <!-- cmpose:sharing -->
 - `GET /api/v1/spaces` returns at most 200 spaces as one array, not paged: the caller's personal space first, then by
   name ignoring case.
