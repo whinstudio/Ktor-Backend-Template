@@ -3,6 +3,8 @@
 kotlin = "2.4.21"
 kotlinxSerializationJson = "1.12.0"
 ktor = "3.6.1"
+# Only a floor over the Netty that Ktor brings: drop it once Ktor brings this version or newer.
+netty = "4.2.20.Final"
 detekt = "2.0.0-alpha.6"
 jwksRsa = "0.22.1"
 javaJwt = "4.5.2"
@@ -24,6 +26,7 @@ dependencyCheck = "13.0.0"
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
 ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
