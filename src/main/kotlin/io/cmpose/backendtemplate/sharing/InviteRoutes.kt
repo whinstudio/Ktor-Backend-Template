@@ -58,6 +58,8 @@ fun Route.inviteRoutes(spaces: SpaceRepository, invites: InviteRepository) {
                     call.application.log.info("Invite revoked")
                     call.respond(HttpStatusCode.NoContent)
                 }
+                // Nothing changed, so no audit line; the client gets the same answer as for a revoke.
+                RevokeResult.UNCHANGED -> call.respond(HttpStatusCode.NoContent)
                 RevokeResult.USED -> inviteUsed()
                 RevokeResult.NOT_FOUND -> notFound()
             }

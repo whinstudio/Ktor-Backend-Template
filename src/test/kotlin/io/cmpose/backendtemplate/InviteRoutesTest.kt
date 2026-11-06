@@ -36,7 +36,6 @@ import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
-import kotlin.io.path.createTempDirectory
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -310,8 +309,10 @@ class InviteRoutesTest {
     }
 
     @Test
-    fun pendingInviteQuota() = withApp(testConfig().copy(maxPendingInvitesPerSpace = 2)) { client ->
-        // Alice makes nine sensitive calls here; the spaces come from the repository so the tenth is not reached.
+    fun pendingInviteQuota() = withApp(
+        // This test is about the quota: the higher rate limit keeps its many invite calls from ending in a 429.
+        testConfig().copy(maxPendingInvitesPerSpace = 2, rateLimitSensitivePerMinute = 100),
+    ) { client ->
         val space = client.ownedSpace(alice, "Trip")
         val aliceId = UserId(UUID.fromString(client.userId(alice)))
         val eightDaysAgo = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
@@ -445,7 +446,7 @@ class InviteRoutesTest {
     @Test
     fun editorUploadAndOwnerInviteDoNotDeadlock() {
         val config = testConfig().copy(
-            filesDir = createTempDirectory("invite-test").toString(),
+            filesDir = tempDir("invite-test").toString(),
             maxStorageBytesPerUser = 1000,
             maxPendingInvitesPerSpace = 5,
         )
@@ -556,7 +557,10 @@ class InviteRoutesTest {
         clock = link.expiresAt + 1
         assertEquals(InviteState.REVOKED, invites.preview(link.token)?.state)
         assertEquals(AcceptResult.Revoked, invites.accept(link.token, joiner, spaces))
-        assertEquals(RevokeResult.REVOKED, invites.revoke(spaceId, UUID.fromString(link.id)))
+        assertEquals(RevokeResult.UNCHANGED, invites.revoke(spaceId, UUID.fromString(link.id)))
+        val lapsed = invites.create(spaceId, owner, Role.VIEWER)
+        clock = lapsed.expiresAt + 1
+        assertEquals(RevokeResult.UNCHANGED, invites.revoke(spaceId, UUID.fromString(lapsed.id)))
     }
 
     @Test

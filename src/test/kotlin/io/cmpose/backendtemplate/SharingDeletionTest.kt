@@ -18,7 +18,6 @@ import io.ktor.server.testing.testApplication
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.UUID
-import kotlin.io.path.createTempDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -42,7 +41,7 @@ class SharingDeletionTest {
 
     @Test
     fun deletionRemovesOwnedSpacesAndMembershipsAndKeepsOthers() = testApplication {
-        val dir = createTempDirectory("sharing-deletion-test")
+        val dir = tempDir("sharing-deletion-test")
         application { module(authDeps(config = testConfig().copy(filesDir = dir.toString()))) }
         val client = jsonClient()
         val aliceId = UUID.fromString(client.userId(alice))
