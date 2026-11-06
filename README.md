@@ -10,8 +10,8 @@ One sample feature shows the shape to copy.
 - Kotlin on JVM 21, Ktor, Exposed, Flyway, PostgreSQL, HikariCP, logback.
 - Sign-in: the app signs in with Firebase; the server checks each ID token's signature against Google's public keys,
   its audience, issuer and age. No Admin SDK and no service account.
-- Tests run on an embedded PostgreSQL and sign their own tokens with a test key, so `./gradlew build` needs neither a
-  database nor a network.
+- Tests run on an embedded PostgreSQL and sign their own tokens with a test key, so `./gradlew build` needs no database
+  of your own and no access to Google. The first build still downloads its dependencies.
 
 ## Layout
 
@@ -141,4 +141,5 @@ to `openapi/OpenApiSpec.kt`; `OpenApiTest` keeps the two in step.
 ## Deploy
 
 CI (`.github/workflows/ci.yml`) builds, tests and scans the code and publishes the image to GitHub's container
-registry. [`deploy/README.md`](deploy/README.md) covers the server contract, the first deployment, updates and rollback.
+registry. The dependency scan runs only when the `NVD_API_KEY` secret is set; without it CI skips that scan with a
+notice. [`deploy/README.md`](deploy/README.md) covers the server contract, the first deployment, updates and rollback.
