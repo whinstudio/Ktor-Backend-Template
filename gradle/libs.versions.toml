@@ -6,7 +6,7 @@ ktor = "3.6.1"
 # Only a floor over the Netty that Ktor brings: drop it once Ktor brings this version or newer.
 netty = "4.2.20.Final"
 detekt = "2.0.0-alpha.6"
-jwksRsa = "0.22.1"
+jwksRsa = "0.24.2"
 javaJwt = "4.5.2"
 exposed = "0.61.0"
 flyway = "11.10.4"
