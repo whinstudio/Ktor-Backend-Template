@@ -12,11 +12,14 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.BeforeTest
@@ -78,6 +81,7 @@ class UnknownKidTest {
         jwks: JwkProvider,
         keySet: PublishedKeyIds? = null,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        unknownKidWaitMillis: Long = 10_000L,
         clock: () -> Long,
     ) =
         FirebaseTokenVerifier(
@@ -88,6 +92,7 @@ class UnknownKidTest {
             dispatcher,
             clock,
             keySet,
+            unknownKidWaitMillis,
         )
 
     @Test
@@ -194,8 +199,54 @@ class UnknownKidTest {
         keySet.release.countDown()
         assertFailsWith<AuthUnavailableException> { first.await().getOrThrow() }
         assertFailsWith<AuthUnavailableException> { second.await().getOrThrow() }
-        // The failed fetch gives the slot back, so the waiter takes it and fetches once itself.
-        assertEquals(2, keySet.fetches)
+        // The waiter shares the failed fetch's outcome instead of fetching again.
+        assertEquals(1, keySet.fetches)
+    }
+
+    @Test
+    fun waitersDoNotHoldThreadsWhileTheFetchIsInFlight() = runBlocking {
+        val jwks = CountingProvider(setOf(TestKeys.KID, "rotated"))
+        val warmUp = CountingKeySet(setOf(TestKeys.KID))
+        val held = BlockingKeySet(setOf(TestKeys.KID, "rotated"))
+        var current: PublishedKeyIds = warmUp
+        val pool = Executors.newFixedThreadPool(2).asCoroutineDispatcher()
+        try {
+            val verifier = verifier(jwks, { current.fetch() }, pool) { 1_000_000L }
+            // Learns TestKeys.KID, which frees the slot again for the held fetch below.
+            assertNotNull(verifier.verify(TestKeys.token(sub = "alice")))
+            current = held
+            val first = async(Dispatchers.Default) { verifier.verify(TestKeys.token(sub = "bob", kid = "rotated")) }
+            assertTrue(held.started.await(RELEASE_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            val waiters = List(20) {
+                async(Dispatchers.Default) { verifier.verify(TestKeys.token(sub = "bob", kid = "rotated")) }
+            }
+            delay(WAITER_HEAD_START_MILLIS)
+            val known = withTimeoutOrNull(KNOWN_KID_BOUND_MILLIS) { verifier.verify(TestKeys.token(sub = "alice")) }
+            assertNotNull(known, "a known kid must not wait for threads held by waiters")
+            held.release.countDown()
+            assertNotNull(first.await())
+            waiters.forEach { assertNotNull(it.await()) }
+            assertEquals(1, held.fetches)
+        } finally {
+            held.release.countDown()
+            pool.close()
+        }
+    }
+
+    @Test
+    fun aWaiterGivesUpAfterTheWaitBound() = runBlocking {
+        val keySet = BlockingKeySet(setOf(TestKeys.KID))
+        val verifier = verifier(CountingProvider(), keySet, Dispatchers.IO, unknownKidWaitMillis = 200) { 1_000_000L }
+        val first = async(Dispatchers.Default) { verifier.verify(TestKeys.token(sub = "alice")) }
+        assertTrue(keySet.started.await(RELEASE_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        val started = System.nanoTime()
+        val waiter = async(Dispatchers.Default) { runCatching { verifier.verify(TestKeys.token(sub = "alice")) } }
+        assertFailsWith<AuthUnavailableException> { waiter.await().getOrThrow() }
+        val waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+        assertTrue(waitedMillis < WAIT_BOUND_CHECK_MILLIS, "waited $waitedMillis ms")
+        keySet.release.countDown()
+        assertNotNull(first.await())
+        assertEquals(1, keySet.fetches)
     }
 
     @Test
@@ -211,3 +262,5 @@ class UnknownKidTest {
 
 private const val RELEASE_TIMEOUT_SECONDS = 5L
 private const val WAITER_HEAD_START_MILLIS = 100L
+private const val KNOWN_KID_BOUND_MILLIS = 2_000L
+private const val WAIT_BOUND_CHECK_MILLIS = 1_000L
