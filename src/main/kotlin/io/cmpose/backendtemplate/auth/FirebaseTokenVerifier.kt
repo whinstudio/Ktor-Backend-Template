@@ -56,8 +56,9 @@ internal fun rejectToken(reason: String): Nothing? {
  * finds the key frees the slot again, so new real kids (a cold start, a key rotation) resolve back to back. With
  * [publishedKeyIds] that lookup fetches Google's whole key set and learns every kid in it, so a flood's one fetch per
  * interval also learns a newly published real key (Google publishes a key before it signs with it): a real kid is not
- * refused during a flood (except while that one fetch is in flight). Without it only the token's own kid is looked up,
- * and during a flood a new real kid may be refused for up to one interval.
+ * refused during a flood. A request for an unknown kid that arrives while that fetch is in flight waits for it and then
+ * uses what it learned (the wait is bounded by the key provider's timeouts). Without it only the token's own kid is
+ * looked up, and during a flood a new real kid may be refused for up to one interval.
  */
 class FirebaseTokenVerifier(
     private val jwks: JwkProvider,
@@ -71,6 +72,9 @@ class FirebaseTokenVerifier(
     // Only kids Google's key set really contains get in, so this stays as small as that set's history.
     private val knownKeyIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val lastUnknownLookup = AtomicLong(now() - UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS)
+
+    // Held by an unknown kid's lookup, so a request arriving during a fetch waits for it instead of being refused.
+    private val unknownKidLock = Any()
 
     override suspend fun verify(token: String): VerifiedIdentity? {
         val keyId = acceptedKeyId(token) ?: return null
@@ -112,8 +116,17 @@ class FirebaseTokenVerifier(
         return decoded.keyId ?: rejectToken("missing kid")
     }
 
+    // Runs on [dispatcher], so blocking on [unknownKidLock] while another request fetches is allowed.
     private fun publicKey(keyId: String): RSAPublicKey? {
         if (keyId in knownKeyIds) return knownKey(keyId)
+        return synchronized(unknownKidLock) {
+            // The fetch this request waited for may have learned its kid.
+            if (keyId in knownKeyIds) knownKey(keyId) else lookUpUnknown(keyId)
+        }
+    }
+
+    // Called under [unknownKidLock]: one global slot per interval for a kid not yet known.
+    private fun lookUpUnknown(keyId: String): RSAPublicKey? {
         val previous = lastUnknownLookup.get()
         val at = now()
         val slotFree = at - previous >= UNKNOWN_KID_LOOKUP_INTERVAL_MILLIS
