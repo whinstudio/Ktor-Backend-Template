@@ -65,7 +65,7 @@ tasks.shadowJar {
 
 // Local development server: an embedded PostgreSQL with a persistent data folder and the same module().
 // Kept out of `main` so the release jar (shadowJar) carries neither the runner nor the PostgreSQL binaries.
-val local: SourceSet by sourceSets.creating {
+val local: SourceSet = sourceSets.create("local") {
     compileClasspath += sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().output
 }
